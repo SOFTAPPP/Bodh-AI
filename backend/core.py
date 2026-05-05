@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -34,15 +35,11 @@ if not os.path.exists(DATA_DIR):
 class PDFChatBot:
     def __init__(self):
         self.embeddings = OpenAIEmbeddings()
-        self.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.2)
+        self.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.1) # Lower temperature for higher precision
         self.vector_store = None
 
-    # ---------------------------------------------------------
-    # DYNAMIC: Detect person name using AI (Production Ready)
-    # ---------------------------------------------------------
     async def detect_person_dynamically(self, query: str):
         """Uses LLM to identify the subject of the question."""
-        # Simple, fast check for greetings to avoid unnecessary LLM calls
         if any(greet in query.lower() for greet in ["hi", "hello", "hey"]):
             return None
 
@@ -73,55 +70,57 @@ class PDFChatBot:
             chunk.metadata["chunk_index"] = i
             chunk.metadata["source_file"] = file_name   
 
-        # Create / update FAISS
         if os.path.exists(FAISS_INDEX_PATH):
-            existing_vs = FAISS.load_local(
-                FAISS_INDEX_PATH,
-                self.embeddings,
-                allow_dangerous_deserialization=True
-            )
-            existing_vs.add_documents(chunks)
-            self.vector_store = existing_vs
-        else:
-            self.vector_store = FAISS.from_documents(chunks, self.embeddings)
-
+            try:
+                shutil.rmtree(FAISS_INDEX_PATH)
+            except:
+                pass
+        
+        self.vector_store = FAISS.from_documents(chunks, self.embeddings)
         self.vector_store.save_local(FAISS_INDEX_PATH)
         return len(chunks)
 
     # -------------------------------
     def load_index(self):
         if os.path.exists(FAISS_INDEX_PATH):
-            self.vector_store = FAISS.load_local(
-                FAISS_INDEX_PATH,
-                self.embeddings,
-                allow_dangerous_deserialization=True
-            )
-            return True
+            try:
+                self.vector_store = FAISS.load_local(
+                    FAISS_INDEX_PATH,
+                    self.embeddings,
+                    allow_dangerous_deserialization=True
+                )
+                return True
+            except:
+                return False
         return False
 
     async def contextualize_query(self, query: str, history: list):
-        """Uses conversation history to make the current query standalone."""
+        """Robustly rephrases follow-up questions into standalone queries."""
         if not history:
             return query
         
         history_str = ""
-        for msg in history[-5:]: # Use last 5 messages for context
+        for msg in history[-5:]:
             role = "User" if msg.get("role") == "user" else "Assistant"
             history_str += f"{role}: {msg.get('content', '')}\n"
             
-        prompt = f"""Given the following conversation history and a follow-up question, rephrase the follow-up question to be a standalone question that can be understood without the history. 
-        If the follow-up question is already standalone, return it as is.
+        prompt = f"""You are a query contextualizer. Given a conversation history and a follow-up question, your goal is to rephrase the follow-up into a standalone question that mentions the correct subjects and entities.
         
-        History:
+        RULES:
+        - Replace pronouns (he, she, they, it) with the actual name or entity mentioned in history.
+        - If the follow-up says "this project" or "that project", replace it with the specific project name from the history.
+        - Keep the output as a concise, direct question.
+        
+        HISTORY:
         {history_str}
         
-        Follow-up: {query}
-        Standalone Question:"""
+        FOLLOW-UP: {query}
+        
+        STANDALONE QUESTION:"""
         
         try:
             response = await self.llm.ainvoke(prompt)
             standalone = response.content.strip()
-            # If the LLM returned nothing useful, fallback to original
             return standalone if standalone else query
         except:
             return query
@@ -130,36 +129,22 @@ class PDFChatBot:
     # MAIN QUESTION FUNCTION
     # -------------------------------
     async def ask_question(self, query: str, history: list = [], active_file: str = None):
-
-        greetings = ["hi", "hello", "hey", "who are you"]
-        if query.lower().strip() in greetings:
-            yield "Hello! I am your PDF Assistant. How can I help you today?"
-            return
-
         if not self.vector_store:
             if not self.load_index():
                 yield "No PDF uploaded yet."
                 return
 
-        # 1. Contextualize the query based on history
+        # 1. Contextualize the query
         standalone_query = await self.contextualize_query(query, history)
         print(f"--- Original: {query} | Standalone: {standalone_query} ---")
 
-        # ---------------------------------------------------------
-        # OPTIMIZED RETRIEVAL: Use Metadata Filtering + MMR
-        # ---------------------------------------------------------
-        # DYNAMIC RETRIEVAL: Auto-detect person and filter
-        # ---------------------------------------------------------
-        # We use the standalone query to detect the person more accurately
         target_person = await self.detect_person_dynamically(standalone_query)
         
-        # Increase k to ensure we catch all relevant chunks in a multi-page document
-        search_kwargs = {"k": 15} 
-        
-        # LOGIC: 
-        # 1. If a person is explicitly mentioned, filter by their name.
-        # 2. If no person is mentioned BUT we have an active_file, filter by that file.
-        # 3. Otherwise, search everything.
+        search_kwargs = {
+            "k": 15,
+            "fetch_k": 40,
+            "lambda_mult": 0.6
+        } 
         
         filter_file = None
         if target_person:
@@ -172,88 +157,48 @@ class PDFChatBot:
         if filter_file:
             search_kwargs["filter"] = lambda metadata: filter_file in metadata.get("source_file", "").lower()
 
-        # Use similarity search for better recall of all items
-        docs = self.vector_store.similarity_search(
+        docs = self.vector_store.search(
             standalone_query, 
+            search_type="mmr",
             **search_kwargs
         )
 
-        relevant_docs = docs
-        if not relevant_docs:
-            yield f"I don't know based on these files. I couldn't find any relevant sections matching your query: **{standalone_query[0:50]}...**"
+        if not docs:
+            yield "I don't know based on the provided context."
             return
 
-        # -------------------------------
-        # BUILD CONTEXT
-        # -------------------------------
-        # Sort by source and then chunk index to maintain logical order (Introduction -> Projects -> Skills)
         sorted_docs = sorted(
-            relevant_docs,
+            docs,
             key=lambda x: (x.metadata.get("source_file", ""), x.metadata.get("chunk_index", 0))
         )
 
-        context_parts = []
-        for doc in sorted_docs:
-            filename = doc.metadata.get("source_file", "unknown")
-            context_parts.append(f"--- SOURCE: {filename} ---\n{doc.page_content}")
+        context_text = "\n\n".join([f"--- SOURCE: {d.metadata.get('source_file')} ---\n{d.page_content}" for d in sorted_docs])
 
-        context_text = "\n\n".join(context_parts)
+        template = """You are a high-precision document extraction and analysis AI.
 
-        # -------------------------------
-        # REFINED PRECISION PROMPT
-        # -------------------------------
-        template = """You are a high-precision document extraction AI.
-
-        Your task is to extract and present ALL relevant information from the given context with ZERO loss, ZERO hallucination, and MAXIMUM detail.
+        Your task is to extract, analyze, and present ALL relevant information from the given context.
 
         CORE RULES:
 
         1. NO HALLUCINATION
         - Use ONLY the provided context.
-        - Do NOT add, assume, or infer anything beyond the text.
-        - If something is not explicitly written, do NOT include it.
+        - You MAY perform logical deductions based on dates (e.g., graduation year 2027 means currently a student).
 
         2. FULL COMPLETENESS (CRITICAL)
-        - Extract EVERY relevant item related to the user’s query.
-        - Do NOT summarize unless explicitly asked.
-        - Do NOT skip repeated or similar items.
-        - If 10 items exist, output all 10.
+        - Extract EVERY relevant item related to the query.
+        - Analyze the entire context for the requested data.
 
-        3. EXACT EXTRACTION
-        - Preserve original wording as much as possible.
-        - Do NOT rephrase key information (names, technologies, numbers, boards, years).
-        - Maintain factual integrity exactly as written.
-
-        4. STRUCTURED OUTPUT (MANDATORY)
+        3. STRUCTURED OUTPUT (MANDATORY)
         - Organize output into clear sections using Markdown.
-        - Use bold headers like:
-        **Projects**
-        **Education**
-        **Technical Skills**
-        **Experience**
-        - Under each section, use bullet points.
-        - For projects:
-        - Show project name as **bold**
-        - Add details as bullet points under it
+        - Use bold headers and bullet points.
+        - For projects, always list the Name, Technologies, and Description separately.
 
-        5. MULTI-ENTITY SAFETY
-        - If multiple individuals exist in the context:
-        - ONLY extract data for the correct person (based on the query)
-        - NEVER mix information between individuals
+        4. MISSING INFORMATION HANDLING
+        - If the requested data is absolutely not in the context:
+        → respond exactly with: "I don't know based on the provided context."
 
-        6. MISSING INFORMATION HANDLING
-        - If the requested data is not found:
-        → respond exactly with:
-        "I don't know based on the provided context."
-
-        7. NO GENERIC TEXT
-        - Do NOT add explanations like "based on the document"
-        - Do NOT add filler or conversational text
-        - Output only structured extracted data
-
-        8. PRIORITY LOGIC
-        - Accuracy > Completeness > Formatting
-        - Never sacrifice correctness for formatting
+        5. NO REPETITION OF THE QUESTION
+        - Start your answer immediately with the data. Do NOT restate or repeat the user's question.
 
         --------------------------------------------------
 
@@ -266,11 +211,8 @@ class PDFChatBot:
         Answer:"""
         
         prompt = PromptTemplate(template=template, input_variables=["context", "question"])
-        final_prompt = prompt.format(context=context_text, question=query)
+        final_prompt = prompt.format(context=context_text, question=standalone_query)
 
-        # -------------------------------
-        # STREAM RESPONSE
-        # -------------------------------
         full_response = ""
         async for chunk in self.llm.astream(final_prompt):
             if chunk.content:
