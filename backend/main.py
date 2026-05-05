@@ -23,6 +23,8 @@ bot = PDFChatBot()
 # Data models
 class ChatRequest(BaseModel):
     message: str
+    history: list = []
+    active_file: str = None
 
 @app.get("/")
 async def root():
@@ -54,7 +56,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    return StreamingResponse(bot.ask_question(request.message), media_type="text/plain")
+    return StreamingResponse(bot.ask_question(request.message, request.history, request.active_file), media_type="text/plain")
 
 if __name__ == "__main__":
     import uvicorn

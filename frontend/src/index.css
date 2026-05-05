@@ -1,16 +1,45 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700;800&display=swap');
 
 :root {
-  --bg-main: #05060b;
-  --bg-sidebar: #0a0c14;
-  --card-bg: rgba(22, 24, 33, 0.7);
-  --accent-primary: #818cf8;
-  --accent-secondary: #c084fc;
-  --accent-gradient: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
+  /* Light Theme (Default) */
+  --bg-main: #ffffff;
+  --bg-sidebar: #f8fafc;
+  --bg-header: rgba(255, 255, 255, 0.8);
+  --bg-input: rgba(255, 255, 255, 0.9);
+  --bg-bubble-bot: #f8fafc;
+  --bg-bubble-user: #2563eb;
+  --card-bg: rgba(255, 255, 255, 0.5);
+  --accent-primary: #2563eb;
+  --accent-secondary: #4f46e5;
+  --accent-gradient: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-subtle: rgba(0, 0, 0, 0.1);
+  --glass-effect: blur(16px) saturate(180%);
+  --shadow-sm: 0 4px 10px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --bg-gradient: radial-gradient(circle at 50% 0%, #f1f5f9 0%, #ffffff 100%);
+}
+
+.dark {
+  /* Dark Theme */
+  --bg-main: #080a0c;
+  --bg-sidebar: #0c1218;
+  --bg-header: rgba(5, 6, 11, 0.4);
+  --bg-input: rgba(10, 12, 20, 0.8);
+  --bg-bubble-bot: rgba(22, 24, 33, 0.8);
+  --bg-bubble-user: #2563eb;
+  --card-bg: rgba(12, 18, 24, 0.7);
+  --accent-primary: #2dd4bf;
+  --accent-secondary: #22d3ee;
+  --accent-gradient: linear-gradient(135deg, #2dd4bf 0%, #22d3ee 100%);
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
   --border-subtle: rgba(255, 255, 255, 0.08);
   --glass-effect: blur(16px) saturate(180%);
+  --shadow-sm: 0 4px 10px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.4);
+  --bg-gradient: radial-gradient(circle at 50% 0%, #111827 0%, #080a0c 100%);
 }
 
 * {

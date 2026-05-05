@@ -99,10 +99,37 @@ class PDFChatBot:
             return True
         return False
 
+    async def contextualize_query(self, query: str, history: list):
+        """Uses conversation history to make the current query standalone."""
+        if not history:
+            return query
+        
+        history_str = ""
+        for msg in history[-5:]: # Use last 5 messages for context
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            history_str += f"{role}: {msg.get('content', '')}\n"
+            
+        prompt = f"""Given the following conversation history and a follow-up question, rephrase the follow-up question to be a standalone question that can be understood without the history. 
+        If the follow-up question is already standalone, return it as is.
+        
+        History:
+        {history_str}
+        
+        Follow-up: {query}
+        Standalone Question:"""
+        
+        try:
+            response = await self.llm.ainvoke(prompt)
+            standalone = response.content.strip()
+            # If the LLM returned nothing useful, fallback to original
+            return standalone if standalone else query
+        except:
+            return query
+
     # -------------------------------
     # MAIN QUESTION FUNCTION
     # -------------------------------
-    async def ask_question(self, query: str):
+    async def ask_question(self, query: str, history: list = [], active_file: str = None):
 
         greetings = ["hi", "hello", "hey", "who are you"]
         if query.lower().strip() in greetings:
@@ -114,30 +141,46 @@ class PDFChatBot:
                 yield "No PDF uploaded yet."
                 return
 
+        # 1. Contextualize the query based on history
+        standalone_query = await self.contextualize_query(query, history)
+        print(f"--- Original: {query} | Standalone: {standalone_query} ---")
+
         # ---------------------------------------------------------
         # OPTIMIZED RETRIEVAL: Use Metadata Filtering + MMR
         # ---------------------------------------------------------
         # DYNAMIC RETRIEVAL: Auto-detect person and filter
         # ---------------------------------------------------------
-        target_person = await self.detect_person_dynamically(query)
+        # We use the standalone query to detect the person more accurately
+        target_person = await self.detect_person_dynamically(standalone_query)
         
         # Increase k to ensure we catch all relevant chunks in a multi-page document
         search_kwargs = {"k": 15} 
         
-        # If we detect a person, strictly filter to their file only
+        # LOGIC: 
+        # 1. If a person is explicitly mentioned, filter by their name.
+        # 2. If no person is mentioned BUT we have an active_file, filter by that file.
+        # 3. Otherwise, search everything.
+        
+        filter_file = None
         if target_person:
             print(f"--- TARGET DETECTED: {target_person} (Filtering Search) ---")
-            search_kwargs["filter"] = lambda metadata: target_person in metadata.get("source_file", "").lower()
+            filter_file = target_person
+        elif active_file:
+            print(f"--- NO TARGET: Using Active File Fallback: {active_file} ---")
+            filter_file = active_file.lower()
+
+        if filter_file:
+            search_kwargs["filter"] = lambda metadata: filter_file in metadata.get("source_file", "").lower()
 
         # Use similarity search for better recall of all items
         docs = self.vector_store.similarity_search(
-            query, 
+            standalone_query, 
             **search_kwargs
         )
 
         relevant_docs = docs
         if not relevant_docs:
-            yield f"I don't know based on these files. I couldn't find any relevant sections matching your query: **{query[0:50]}...**"
+            yield f"I don't know based on these files. I couldn't find any relevant sections matching your query: **{standalone_query[0:50]}...**"
             return
 
         # -------------------------------

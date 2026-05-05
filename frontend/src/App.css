@@ -2,7 +2,7 @@
   display: flex;
   height: 100vh;
   width: 100vw;
-  background: radial-gradient(circle at 50% 0%, #1a1c2e 0%, #05060b 100%);
+  background: var(--bg-gradient);
 }
 
 /* Sidebar Design */
@@ -32,7 +32,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 20px rgba(129, 140, 248, 0.3);
+  box-shadow: var(--shadow-sm);
   position: relative;
   overflow: hidden;
 }
@@ -64,26 +64,26 @@
   align-items: center;
   justify-content: center;
   padding: 40px 24px;
-  border: 2px dashed rgba(129, 140, 248, 0.2);
+  border: 2px dashed var(--border-subtle);
   border-radius: 24px;
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--card-bg);
   text-align: center;
   margin-bottom: 24px;
 }
 
 .upload-card:hover {
   border-color: var(--accent-primary);
-  background: rgba(129, 140, 248, 0.05);
+  background: rgba(var(--accent-primary), 0.05);
   transform: translateY(-4px) scale(1.02);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg);
 }
 
 .upload-icon {
   color: var(--accent-primary);
   margin-bottom: 20px;
-  filter: drop-shadow(0 0 10px rgba(129, 140, 248, 0.5));
+  filter: drop-shadow(0 0 10px var(--accent-primary));
 }
 
 .upload-card p {
@@ -107,8 +107,8 @@
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: rgba(129, 140, 248, 0.1);
-  border: 1px solid rgba(129, 140, 248, 0.2);
+  background: var(--card-bg);
+  border: 1px solid var(--border-subtle);
   border-radius: 14px;
   font-size: 14px;
   color: var(--accent-primary);
@@ -142,7 +142,7 @@
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(5, 6, 11, 0.4);
+  background: var(--bg-header);
   backdrop-filter: blur(10px);
   z-index: 50;
 }
@@ -153,6 +153,34 @@
   color: var(--text-primary);
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.theme-toggle {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.theme-toggle:hover {
+  transform: translateY(-2px);
+  background: var(--accent-primary);
+  color: white;
+  border-color: transparent;
+  box-shadow: var(--shadow-sm);
+}
+
 .status-indicator {
   display: flex;
   align-items: center;
@@ -160,7 +188,7 @@
   font-size: 14px;
   font-weight: 500;
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--card-bg);
   border-radius: 30px;
   border: 1px solid var(--border-subtle);
 }
@@ -168,13 +196,13 @@
 .dot {
   width: 10px;
   height: 10px;
-  background: #334155;
+  background: var(--text-secondary);
   border-radius: 50%;
 }
 
 .dot.active {
   background: #22c55e;
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.6);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
   animation: pulse 2s infinite;
 }
 
@@ -203,8 +231,8 @@
 .empty-icon {
   width: 100px;
   height: 100px;
-  background: rgba(129, 140, 248, 0.05);
-  border: 1px solid rgba(129, 140, 248, 0.1);
+  background: var(--card-bg);
+  border: 1px solid var(--border-subtle);
   border-radius: 28px;
   display: flex;
   align-items: center;
@@ -241,7 +269,7 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-sm);
 }
 
 .bot .message-icon {
@@ -250,7 +278,7 @@
 }
 
 .user .message-icon {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--card-bg);
   color: var(--text-primary);
 }
 
@@ -259,18 +287,18 @@
   border-radius: 20px;
   font-size: 16px;
   line-height: 1.7;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(5px);
+  box-shadow: var(--shadow-sm);
 }
 
 .bot .message-bubble {
-  background: rgba(22, 24, 33, 0.8);
+  background: var(--bg-bubble-bot);
   border: 1px solid var(--border-subtle);
   border-top-left-radius: 4px;
+  color: var(--text-primary);
 }
 
 .user .message-bubble {
-  background: var(--accent-primary);
+  background: var(--bg-bubble-user);
   color: white;
   border-top-right-radius: 4px;
 }
@@ -293,7 +321,7 @@
 .sources-container {
   margin-top: 16px;
   padding: 12px 18px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--card-bg);
   border-radius: 12px;
   border: 1px solid var(--border-subtle);
 }
@@ -317,10 +345,10 @@
   font-size: 11px;
   font-weight: 700;
   padding: 4px 12px;
-  background: rgba(129, 140, 248, 0.15);
+  background: var(--card-bg);
   color: var(--accent-primary);
   border-radius: 6px;
-  border: 1px solid rgba(129, 140, 248, 0.2);
+  border: 1px solid var(--border-subtle);
 }
 
 /* Input Section Design */
@@ -330,7 +358,7 @@
 }
 
 .input-wrapper {
-  background: rgba(10, 12, 20, 0.8);
+  background: var(--bg-input);
   backdrop-filter: var(--glass-effect);
   border: 1px solid var(--border-subtle);
   border-radius: 24px;
@@ -338,12 +366,12 @@
   align-items: center;
   padding: 8px 12px;
   transition: all 0.4s ease;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
 }
 
 .input-wrapper:focus-within {
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.15), 0 20px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   transform: translateY(-2px);
 }
 
@@ -360,7 +388,7 @@
 .mic-button {
   width: 44px;
   height: 44px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--card-bg);
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   display: flex;
@@ -373,19 +401,20 @@
 }
 
 .mic-button:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--card-bg);
   color: var(--text-primary);
+  opacity: 0.8;
 }
 
 .mic-button.listening {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
   color: #ef4444;
   animation: pulse-red 1.5s infinite;
 }
 
 @keyframes pulse-red {
-  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3); }
   70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
   100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
 }
@@ -402,19 +431,20 @@
   justify-content: center;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 8px 15px rgba(129, 140, 248, 0.3);
+  box-shadow: var(--shadow-sm);
 }
 
 .send-button:hover:not(.disabled) {
   transform: scale(1.05) rotate(5deg);
-  box-shadow: 0 12px 20px rgba(129, 140, 248, 0.4);
+  box-shadow: var(--shadow-lg);
 }
 
 .send-button.disabled {
-  background: #1e293b;
-  opacity: 0.5;
+  background: var(--text-secondary);
+  opacity: 0.3;
   cursor: not-allowed;
   box-shadow: none;
+  color: white;
 }
 
 .message-bubble.pulse {
@@ -422,9 +452,9 @@
 }
 
 @keyframes pulse-bg {
-  0% { background: rgba(22, 24, 33, 0.8); }
-  50% { background: rgba(40, 44, 60, 0.9); }
-  100% { background: rgba(22, 24, 33, 0.8); }
+  0% { background: var(--bg-bubble-bot); }
+  50% { opacity: 0.7; }
+  100% { background: var(--bg-bubble-bot); }
 }
 
 .typing-indicator {
@@ -460,7 +490,7 @@
 
 /* Thinking Shimmer Effect */
 .message-bubble.thinking {
-  background: linear-gradient(90deg, rgba(22, 24, 33, 0.8), rgba(40, 44, 60, 0.8), rgba(22, 24, 33, 0.8));
+  background: linear-gradient(90deg, var(--bg-bubble-bot), var(--card-bg), var(--bg-bubble-bot));
   background-size: 200% 100%;
   animation: shimmer 2s infinite linear;
   color: var(--accent-primary);
@@ -488,7 +518,7 @@
   color: var(--accent-primary);
   margin-top: 24px;
   margin-bottom: 12px;
-  border-bottom: 1px solid rgba(129, 140, 248, 0.15);
+  border-bottom: 1px solid var(--border-subtle);
   padding-bottom: 6px;
   display: block;
 }
@@ -513,4 +543,18 @@
 
 .text-line {
   margin-bottom: 12px;
+}
+
+.message-link {
+  color: var(--accent-primary);
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 1px dashed var(--accent-primary);
+  transition: all 0.2s ease;
+}
+
+.message-link:hover {
+  color: var(--accent-secondary);
+  border-bottom-style: solid;
+  opacity: 0.8;
 }

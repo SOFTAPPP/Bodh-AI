@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Send, FileText, Bot, User, Loader2, CheckCircle2, Mic, MicOff } from 'lucide-react';
+import { Upload, Send, FileText, Bot, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon } from 'lucide-react';
 import './App.css';
 
 interface Message {
@@ -16,8 +16,18 @@ function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
+  const [darkMode, setDarkMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+
+  // Theme Toggle Effect
+  useEffect(() => {
+    if (darkMode) {
+      document.body.classList.add('dark');
+    } else {
+      document.body.classList.remove('dark');
+    }
+  }, [darkMode]);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -120,7 +130,11 @@ function App() {
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ 
+          message: input,
+          history: messages.map(m => ({ role: m.role, content: m.content })),
+          active_file: currentFile
+        }),
       });
 
       if (!response.ok) throw new Error('Network response was not ok');
@@ -194,9 +208,18 @@ function App() {
       <main className="chat-area">
         <header className="chat-header">
           <h3>Chat Interface</h3>
-          <div className="status-indicator">
-            <div className={`dot ${currentFile ? 'active' : ''}`}></div>
-            {currentFile ? 'AI Ready' : 'Upload a file to start'}
+          <div className="header-actions">
+            <button 
+              className="theme-toggle" 
+              onClick={() => setDarkMode(!darkMode)}
+              title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+            <div className="status-indicator">
+              <div className={`dot ${currentFile ? 'active' : ''}`}></div>
+              {currentFile ? 'AI Ready' : 'Upload a file to start'}
+            </div>
           </div>
         </header>
 
@@ -227,10 +250,26 @@ function App() {
                       // Detect category headers: starts with ** and ends with ** (optionally with a colon)
                       const isCategoryHeader = /^(\*\*.*?\*\*:?|.*?:\s*)$/.test(trimmedLine) && !isBullet && trimmedLine.length < 50;
 
-                      const parts = content.split(/(\*\*.*?\*\*)/g);
+                      const parts = content.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g);
                       const renderedLine = parts.map((part, index) => {
                         if (part.startsWith('**') && part.endsWith('**')) {
                           return <strong key={index}>{part.slice(2, -2)}</strong>;
+                        }
+                        if (part.startsWith('[') && part.includes('](')) {
+                          const match = part.match(/\[(.*?)\]\((.*?)\)/);
+                          if (match) {
+                            return (
+                              <a 
+                                key={index} 
+                                href={match[2]} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="message-link"
+                              >
+                                {match[1]}
+                              </a>
+                            );
+                          }
                         }
                         return part;
                       });
