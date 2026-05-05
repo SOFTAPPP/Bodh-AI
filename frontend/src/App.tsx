@@ -64,12 +64,12 @@ function App() {
     }
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (isSmooth = false) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: isSmooth ? 'smooth' : 'auto' });
   };
 
   useEffect(() => {
-    scrollToBottom();
+    scrollToBottom(messages.length > 0 && !isThinking);
   }, [messages, isThinking]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -115,7 +115,6 @@ function App() {
     setInput('');
     setIsThinking(true);
 
-    // Create a unique ID for the bot message we're about to stream
     const botMsgId = (Date.now() + 1).toString();
     const botPlaceholder: Message = {
       id: botMsgId,
@@ -149,14 +148,20 @@ function App() {
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          if (chunk.trim()) setIsThinking(false); // Only stop thinking when real text arrives
-
-          streamedContent += chunk;
-
-          // Update the message in the state as it streams
-          setMessages(prev => prev.map(msg =>
-            msg.id === botMsgId ? { ...msg, content: streamedContent } : msg
-          ));
+          if (chunk) {
+             streamedContent += chunk;
+             setIsThinking(false);
+             // Update the message in the state as it streams
+             setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last && last.id === botMsgId) {
+                   const updated = [...prev];
+                   updated[updated.length - 1] = { ...last, content: streamedContent };
+                   return updated;
+                }
+                return prev;
+             });
+          }
         }
       }
     } catch (error) {
@@ -167,6 +172,60 @@ function App() {
     } finally {
       setIsThinking(false);
     }
+  };
+
+  // Helper to render message content efficiently
+  const renderMessageContent = (content: string, isThinking: boolean, role: string) => {
+    if (!content && role === 'bot') {
+      return (
+        <div className="typing-indicator-wrapper">
+          {isThinking ? (
+            <div className="thinking-content">
+              <Loader2 size={16} className="spin" />
+              <span>AI is analyzing...</span>
+            </div>
+          ) : (
+            <div className="typing-indicator">
+              <span></span><span></span><span></span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return content.split('\n').map((line, i) => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) return <div key={i} style={{ height: '8px' }}></div>;
+
+      const isBullet = /^[-*•]\s+/.test(trimmedLine);
+      const text = trimmedLine.replace(/^[-*•]+\s+/, '');
+      const isCategoryHeader = /^(\*\*.*?\*\*:?|.*?:\s*)$/.test(trimmedLine) && !isBullet && trimmedLine.length < 50;
+
+      const parts = text.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g);
+      const renderedLine = parts.map((part, idx) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={idx}>{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith('[') && part.includes('](')) {
+          const match = part.match(/\[(.*?)\]\((.*?)\)/);
+          if (match) {
+            return (
+              <a key={idx} href={match[2]} target="_blank" rel="noopener noreferrer" className="message-link">
+                {match[1]}
+              </a>
+            );
+          }
+        }
+        return part;
+      });
+
+      return (
+        <div key={i} className={`${isBullet ? 'bullet-line' : 'text-line'} ${isCategoryHeader ? 'category-header' : ''}`}>
+          {isBullet && <span className="bullet-dot">•</span>}
+          <span>{renderedLine}</span>
+        </div>
+      );
+    });
   };
 
   return (
@@ -204,16 +263,11 @@ function App() {
         </div>
       </aside>
 
-      {/* Main Chat */}
       <main className="chat-area">
         <header className="chat-header">
           <h3>Chat Interface</h3>
           <div className="header-actions">
-            <button
-              className="theme-toggle"
-              onClick={() => setDarkMode(!darkMode)}
-              title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            >
+            <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
               {darkMode ? <Sun size={20} /> : <Moon size={20} />}
             </button>
             <div className="status-indicator">
@@ -226,79 +280,21 @@ function App() {
         <div className="messages-container">
           {messages.length === 0 && (
             <div className="empty-state">
-              <div className="empty-icon">
-                <Bot size={54} strokeWidth={1.5} />
-              </div>
+              <div className="empty-icon"><Bot size={54} strokeWidth={1.5} /></div>
               <h2>PDF Intelligence</h2>
-              <p>Upload your documents and let's unlock their secrets together. Your personal AI assistant is ready.</p>
+              <p>Upload your documents and let's unlock their secrets together.</p>
             </div>
           )}
 
-          {messages.map((msg, index) => (
+          {messages.map((msg) => (
             <div key={msg.id} className={`message-wrapper ${msg.role}`}>
               <div className="message-icon">
                 {msg.role === 'bot' ? <Bot size={20} /> : <User size={20} />}
               </div>
               <div className="message-content">
-                <div className={`message-bubble ${!msg.content && msg.role === 'bot' ? 'pulse' : ''} ${!msg.content && msg.role === 'bot' && isThinking ? 'thinking' : ''}`}>
-                  {msg.content ? (
-                    msg.content.split('\n').map((line, i) => {
-                      const trimmedLine = line.trim();
-                      const isBullet = /^[-*•]\s+/.test(trimmedLine);
-                      const content = trimmedLine.replace(/^[-*•]+\s+/, '');
-
-                      // Detect category headers: starts with ** and ends with ** (optionally with a colon)
-                      const isCategoryHeader = /^(\*\*.*?\*\*:?|.*?:\s*)$/.test(trimmedLine) && !isBullet && trimmedLine.length < 50;
-
-                      const parts = content.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g);
-                      const renderedLine = parts.map((part, index) => {
-                        if (part.startsWith('**') && part.endsWith('**')) {
-                          return <strong key={index}>{part.slice(2, -2)}</strong>;
-                        }
-                        if (part.startsWith('[') && part.includes('](')) {
-                          const match = part.match(/\[(.*?)\]\((.*?)\)/);
-                          if (match) {
-                            return (
-                              <a
-                                key={index}
-                                href={match[2]}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="message-link"
-                              >
-                                {match[1]}
-                              </a>
-                            );
-                          }
-                        }
-                        return part;
-                      });
-
-                      if (!trimmedLine) return <div key={i} style={{ height: '8px' }}></div>;
-
-                      return (
-                        <div key={i} className={`${isBullet ? 'bullet-line' : 'text-line'} ${isCategoryHeader ? 'category-header' : ''}`}>
-                          {isBullet && <span className="bullet-dot">•</span>}
-                          <span>{renderedLine}</span>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="typing-indicator-wrapper">
-                      {isThinking && index === messages.length - 1 ? (
-                        <div className="thinking-content">
-                          <Loader2 size={16} className="spin" />
-                          <span>AI is analyzing...</span>
-                        </div>
-                      ) : (
-                        <div className="typing-indicator">
-                          <span></span><span></span><span></span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                <div className={`message-bubble ${!msg.content && msg.role === 'bot' ? 'pulse' : ''}`}>
+                  {renderMessageContent(msg.content, isThinking, msg.role)}
                 </div>
-
                 {msg.sources && msg.sources.length > 0 && (
                   <div className="sources-container">
                     <p className="source-label">Sources:</p>
