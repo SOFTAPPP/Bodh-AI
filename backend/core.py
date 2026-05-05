@@ -1,6 +1,8 @@
 import os
 import sys
 import shutil
+import asyncio
+from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -23,6 +25,7 @@ load_dotenv(env_path)
 # Setup paths relative to the base directory
 DATA_DIR = os.path.join(BASE_DIR, "data")
 FAISS_INDEX_PATH = os.path.join(DATA_DIR, "faiss_index")
+INDEXED_FILES_LOG = os.path.join(DATA_DIR, "indexed_files.txt")
 
 print(f"--- Backend Initializing ---")
 print(f"Base Directory: {BASE_DIR}")
@@ -35,15 +38,17 @@ if not os.path.exists(DATA_DIR):
 class PDFChatBot:
     def __init__(self):
         self.embeddings = OpenAIEmbeddings()
-        self.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.1) # Lower temperature for higher precision
+        self.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.1) 
         self.vector_store = None
+        self._indexed_files_cache = None
+        self.load_index()
 
     async def detect_person_dynamically(self, query: str):
         """Uses LLM to identify the subject of the question."""
         if any(greet in query.lower() for greet in ["hi", "hello", "hey"]):
             return None
 
-        prompt = f"Identify the person's name this query is about: '{query}'. Respond with ONLY the first name. If no specific person is mentioned, respond 'None'."
+        prompt = f"Identify the person's name this query is about: '{query}'. Respond with ONLY the name (e.g., 'Aritra' or 'John'). If no specific person is mentioned, respond 'None'."
         try:
             response = await self.llm.ainvoke(prompt)
             name = response.content.strip().lower()
@@ -54,7 +59,38 @@ class PDFChatBot:
     # -------------------------------
     # PROCESS PDF
     # -------------------------------
-    def process_pdf(self, file_path: str):
+    def get_indexed_files(self):
+        """Returns a set of already indexed filenames from cache or file."""
+        if self._indexed_files_cache is not None:
+            return self._indexed_files_cache
+            
+        if not os.path.exists(INDEXED_FILES_LOG):
+            self._indexed_files_cache = set()
+            return self._indexed_files_cache
+            
+        with open(INDEXED_FILES_LOG, "r", encoding="utf-8") as f:
+            self._indexed_files_cache = set(line.strip().lower() for line in f if line.strip())
+            return self._indexed_files_cache
+
+    def mark_file_as_indexed(self, filename: str):
+        """Logs a filename as indexed and updates cache."""
+        with open(INDEXED_FILES_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{filename.lower()}\n")
+        
+        if self._indexed_files_cache is not None:
+            self._indexed_files_cache.add(filename.lower())
+        else:
+            self.get_indexed_files() # Initialize cache if needed
+
+    def process_pdf(self, file_path: str, force_reindex: bool = False):
+        file_name = os.path.basename(file_path).lower()
+        indexed_files = self.get_indexed_files()
+
+        if file_name in indexed_files and not force_reindex:
+            print(f"--- Skipping {file_name} (Already Indexed) ---")
+            return 0
+
+        print(f"--- Indexing: {file_name} ---")
         loader = PyPDFLoader(file_path)
         documents = loader.load()
 
@@ -64,21 +100,50 @@ class PDFChatBot:
         )
         chunks = text_splitter.split_documents(documents)
 
-        file_name = os.path.basename(file_path).lower()
-
         for i, chunk in enumerate(chunks):
             chunk.metadata["chunk_index"] = i
             chunk.metadata["source_file"] = file_name   
 
-        if os.path.exists(FAISS_INDEX_PATH):
-            try:
-                shutil.rmtree(FAISS_INDEX_PATH)
-            except:
-                pass
+        # Load existing index or create new one
+        if self.vector_store is None:
+            if os.path.exists(FAISS_INDEX_PATH):
+                self.load_index()
+            
+        if self.vector_store is None:
+            self.vector_store = FAISS.from_documents(chunks, self.embeddings)
+        else:
+            self.vector_store.add_documents(chunks)
         
-        self.vector_store = FAISS.from_documents(chunks, self.embeddings)
         self.vector_store.save_local(FAISS_INDEX_PATH)
+        self.mark_file_as_indexed(file_name)
         return len(chunks)
+
+    def sync_folder(self):
+        """Scans the data directory and indexes any new PDF files using optimized scandir."""
+        indexed_files = self.get_indexed_files()
+        new_files_count = 0
+        total_chunks = 0
+
+        print(f"--- Syncing Folder: {DATA_DIR} ---")
+        try:
+            with os.scandir(DATA_DIR) as entries:
+                for entry in entries:
+                    if entry.is_file() and entry.name.lower().endswith(".pdf"):
+                        if entry.name.lower() not in indexed_files:
+                            file_path = entry.path
+                            try:
+                                chunks = self.process_pdf(file_path)
+                                new_files_count += 1
+                                total_chunks += chunks
+                            except Exception as e:
+                                print(f"Error processing {entry.name}: {e}")
+        except Exception as e:
+            print(f"Error scanning directory: {e}")
+        
+        if new_files_count > 0:
+            print(f"--- Sync Complete: {new_files_count} new files, {total_chunks} total chunks added ---")
+        
+        return new_files_count, total_chunks
 
     # -------------------------------
     def load_index(self):
@@ -128,40 +193,94 @@ class PDFChatBot:
     # -------------------------------
     # MAIN QUESTION FUNCTION
     # -------------------------------
-    async def ask_question(self, query: str, history: list = [], active_file: str = None):
+    async def ask_question(self, query: str, history: Optional[List[Dict[str, str]]] = None, active_file: Optional[str] = None):
+        if history is None:
+            history = []
+            
+        # 0. Ensure index exists or try to sync if empty
         if not self.vector_store:
             if not self.load_index():
-                yield "No PDF uploaded yet."
-                return
+                print("--- Index empty, attempting to sync from data folder... ---")
+                self.sync_folder()
+                if not self.vector_store:
+                    yield "I couldn't find any documents in the database. Please upload some PDFs first."
+                    return
 
-        # 1. Contextualize the query
-        standalone_query = await self.contextualize_query(query, history)
+        # 1. & 2. Parallel Pre-processing (Contextualization & Person Detection)
+        # We run these in parallel to save time.
+        standalone_task = self.contextualize_query(query, history)
+        
+        # Skip person detection for very short queries to save one LLM call
+        if len(query.split()) < 3:
+            standalone_query = await standalone_task
+            target_person = None
+        else:
+            # Detect person on the raw query to start early
+            person_task = self.detect_person_dynamically(query)
+            standalone_query, target_person = await asyncio.gather(standalone_task, person_task)
+
         print(f"--- Original: {query} | Standalone: {standalone_query} ---")
-
-        target_person = await self.detect_person_dynamically(standalone_query)
         
         search_kwargs = {
-            "k": 15,
-            "fetch_k": 40,
-            "lambda_mult": 0.6
+            "k": 15,  # Reduced from 25 for speed (15 is enough for most resumes/projects)
+            "fetch_k": 50,
+            "lambda_mult": 0.5
         } 
         
         filter_file = None
         if target_person:
-            print(f"--- TARGET DETECTED: {target_person} (Filtering Search) ---")
+            print(f"--- TARGET PERSON DETECTED: {target_person} ---")
             filter_file = target_person
         elif active_file:
-            print(f"--- NO TARGET: Using Active File Fallback: {active_file} ---")
+            print(f"--- USING ACTIVE FILE HINT: {active_file} ---")
             filter_file = active_file.lower()
 
-        if filter_file:
-            search_kwargs["filter"] = lambda metadata: filter_file in metadata.get("source_file", "").lower()
-
-        docs = self.vector_store.search(
+        # Try both filtered and unfiltered search to ensure we don't miss anything
+        # while still giving priority to the 'active' or 'targeted' file.
+        all_docs = []
+        
+        # 1. Search everything (Broad Search)
+        print(f"--- Performing broad database search ---")
+        broad_docs = self.vector_store.search(
             standalone_query, 
             search_type="mmr",
             **search_kwargs
         )
+        all_docs.extend(broad_docs)
+
+        # 2. If there's a filter/active file, do a targeted search and merge
+        if filter_file:
+            print(f"--- Performing targeted search for: {filter_file} ---")
+            filtered_kwargs = search_kwargs.copy()
+            filtered_kwargs["k"] = 10 # Get a few specific chunks from the target
+            filtered_kwargs["filter"] = lambda metadata: filter_file in metadata.get("source_file", "").lower()
+            
+            target_docs = self.vector_store.search(
+                standalone_query, 
+                search_type="mmr",
+                **filtered_kwargs
+            )
+            # Add to the beginning to give priority
+            all_docs = target_docs + all_docs
+
+        # 3. Deduplicate by content/source to stay within token limits
+        seen_contents = set()
+        docs = []
+        for d in all_docs:
+            content_hash = hash(d.page_content)
+            if content_hash not in seen_contents:
+                docs.append(d)
+                seen_contents.add(content_hash)
+            if len(docs) >= 20: # Limit total context to 20 high-quality chunks
+                break
+
+        # 4. Final Safety Sync: If STILL no docs at all, check for new files
+        if not docs:
+            print("--- NO RESULTS FOUND. Checking for new files in data folder... ---")
+            new_files, _ = self.sync_folder()
+            if new_files > 0:
+                print(f"--- Found {new_files} new files. Retrying search... ---")
+                docs = self.vector_store.search(standalone_query, search_type="mmr", **search_kwargs)
 
         if not docs:
             yield "I don't know based on the provided context."
@@ -191,7 +310,8 @@ class PDFChatBot:
         3. STRUCTURED OUTPUT (MANDATORY)
         - Organize output into clear sections using Markdown.
         - Use bold headers and bullet points.
-        - For projects, always list the Name, Technologies, and Description separately.
+        - For projects, always list the Name, Technologies, Description, and Developer/Candidate (if found in context) separately.
+        - Always identify the person the information belongs to if a name is present in the context (e.g., at the top of a resume).
 
         4. MISSING INFORMATION HANDLING
         - If the requested data is absolutely not in the context:

@@ -1,7 +1,9 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import asyncio
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List, Optional
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from core import PDFChatBot
@@ -20,11 +22,18 @@ app.add_middleware(
 # Initialize our Bot logic
 bot = PDFChatBot()
 
+@app.on_event("startup")
+async def startup_event():
+    print("--- Startup: Syncing PDF Database in background ---")
+    # Run sync in a separate thread/task to avoid blocking
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, bot.sync_folder)
+
 # Data models
 class ChatRequest(BaseModel):
     message: str
-    history: list = []
-    active_file: str = None
+    history: List[dict] = []
+    active_file: Optional[str] = None
 
 @app.get("/")
 async def root():
@@ -57,6 +66,18 @@ async def upload_pdf(file: UploadFile = File(...)):
 @app.post("/chat")
 async def chat(request: ChatRequest):
     return StreamingResponse(bot.ask_question(request.message, request.history, request.active_file), media_type="text/plain")
+
+@app.post("/sync")
+async def sync_database():
+    try:
+        new_files, chunks = bot.sync_folder()
+        return {
+            "status": "success",
+            "new_files_indexed": new_files,
+            "total_chunks_added": chunks
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

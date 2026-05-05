@@ -130,7 +130,7 @@ function App() {
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           message: input,
           history: messages.map(m => ({ role: m.role, content: m.content })),
           active_file: currentFile
@@ -209,8 +209,8 @@ function App() {
         <header className="chat-header">
           <h3>Chat Interface</h3>
           <div className="header-actions">
-            <button 
-              className="theme-toggle" 
+            <button
+              className="theme-toggle"
               onClick={() => setDarkMode(!darkMode)}
               title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
@@ -259,11 +259,11 @@ function App() {
                           const match = part.match(/\[(.*?)\]\((.*?)\)/);
                           if (match) {
                             return (
-                              <a 
-                                key={index} 
-                                href={match[2]} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
+                              <a
+                                key={index}
+                                href={match[2]}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className="message-link"
                               >
                                 {match[1]}
@@ -285,16 +285,16 @@ function App() {
                     })
                   ) : (
                     <div className="typing-indicator-wrapper">
-                       {isThinking && index === messages.length - 1 ? (
+                      {isThinking && index === messages.length - 1 ? (
                         <div className="thinking-content">
                           <Loader2 size={16} className="spin" />
                           <span>AI is analyzing...</span>
                         </div>
-                       ) : (
+                      ) : (
                         <div className="typing-indicator">
                           <span></span><span></span><span></span>
                         </div>
-                       )}
+                      )}
                     </div>
                   )}
                 </div>
@@ -326,7 +326,7 @@ function App() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
             />
-            <button 
+            <button
               className={`mic-button ${isListening ? 'listening' : ''}`}
               onClick={toggleListening}
               type="button"
