@@ -17,6 +17,7 @@ function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
+  const [indexedFiles, setIndexedFiles] = useState<string[]>([]);
   const [darkMode, setDarkMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -29,6 +30,26 @@ function App() {
       document.body.classList.remove('dark');
     }
   }, [darkMode]);
+
+  const fetchFiles = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/files');
+      if (response.ok) {
+        const data = await response.json();
+        setIndexedFiles(data.files);
+        // If no current file is selected but files exist, select the first one
+        if (!currentFile && data.files.length > 0) {
+          // setCurrentFile(data.files[0]);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch files:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchFiles();
+  }, []);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -92,18 +113,27 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         setCurrentFile(data.filename);
+        
+        const isNew = data.status === 'success';
+        const msg = isNew 
+          ? `Successfully uploaded and indexed **${data.filename}**.` 
+          : `**${data.filename}** is already in the knowledge base. Switched context to it.`;
+
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'bot',
-          content: `Successfully uploaded **${data.filename}**. You can now ask questions about it!`
+          content: msg
         }]);
-        // Auto-switch to chat when file is uploaded from landing or features
+        
+        await fetchFiles(); // Refresh list
         setView('chat');
       }
     } catch (error) {
       console.error('Upload failed:', error);
     } finally {
       setIsUploading(false);
+      // Reset input so the same file can be selected again
+      e.target.value = '';
     }
   };
 
@@ -342,21 +372,35 @@ function App() {
             <div className="upload-section">
               <label className={`upload-card ${isUploading ? 'loading' : ''}`}>
                 <input type="file" accept=".pdf" onChange={handleFileUpload} hidden />
-                <Upload size={32} className="upload-icon" />
+                {isUploading ? (
+                  <Loader2 size={32} className="upload-icon spin" />
+                ) : (
+                  <Upload size={32} className="upload-icon" />
+                )}
                 <p>{isUploading ? 'Processing...' : 'Upload Files'}</p>
                 <span>Supports .pdf files</span>
               </label>
             </div>
 
-            {currentFile && (
-              <div className="file-info fade-in">
-                <div className="file-pill">
-                  <FileText size={16} />
-                  <span>{currentFile}</span>
-                  <CheckCircle2 size={14} color="#10b981" />
-                </div>
+            <div className="file-list-section">
+              <h4 className="section-title">Documents</h4>
+              <div className="file-list-container">
+                {indexedFiles.length === 0 && !isUploading && (
+                  <p className="empty-files-hint">No files indexed yet.</p>
+                )}
+                {indexedFiles.map((file) => (
+                  <div 
+                    key={file} 
+                    className={`file-item ${currentFile === file ? 'active' : ''}`}
+                    onClick={() => setCurrentFile(file)}
+                  >
+                    <FileText size={16} className="file-item-icon" />
+                    <span className="file-item-name" title={file}>{file}</span>
+                    {currentFile === file && <CheckCircle2 size={14} color="#3b82f6" />}
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
 
             <div className="sidebar-nav">
               <button onClick={() => setView('landing')}><Home size={18} /> Home</button>

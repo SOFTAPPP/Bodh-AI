@@ -21,10 +21,21 @@ async def upload_pdf(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
     
     upload_path = os.path.join(Config.UPLOAD_DIR, file.filename)
+    
+    # Save file first
     with open(upload_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
     try:
+        # Check if already indexed
+        indexed_files = bot.doc_service.get_indexed_files()
+        if file.filename.lower() in indexed_files:
+            return {
+                "filename": file.filename,
+                "status": "already_indexed",
+                "message": "File is already in the knowledge base."
+            }
+
         num_chunks = await bot.process_new_pdf(upload_path)
         return {
             "filename": file.filename,
@@ -33,6 +44,11 @@ async def upload_pdf(file: UploadFile = File(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/files")
+async def get_files():
+    files = list(bot.doc_service.get_indexed_files())
+    return {"files": files}
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
