@@ -236,7 +236,7 @@ function App() {
         const tableKey = `table-${index}`;
         // Detect if it's a header or just rows
         const hasHeader = currentTable.length > 0;
-        
+
         renderedElements.push(
           <div key={tableKey} className="table-container streaming-table">
             <table>
@@ -279,7 +279,7 @@ function App() {
           const cells = trimmedLine.split('|').filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map(c => c.trim());
           currentTable.push(cells);
         }
-        
+
         // If it's the last line and we're in a table, push it now
         if (i === lines.length - 1 && isInTable) {
           pushTable(i);
@@ -348,14 +348,14 @@ function App() {
 
       <section className="hero-section hero-gradient">
         <div className="hero-content">
-          <div className="badge animate-fadeIn">New: Enterprise PDF Intelligence</div>
+          <div className="badge animate-fadeIn">State-of-the-Art Document Intelligence</div>
           <h1 className="hero-title animate-slideUp">
-            Unlock the Secrets <br />
-            of Your <span>Documents</span>
+            Precision Insights <br />
+            From Your <span>Documents</span>
           </h1>
           <p className="hero-subtitle animate-slideUp">
-            BodhAI uses advanced RAG technology to provide high-precision answers
-            from your PDFs with zero hallucinations and verbatim evidence.
+            Enterprise-grade RAG engine designed for absolute accuracy in Legal,
+            Medical, and Financial document intelligence.
           </p>
           <div className="hero-actions animate-slideUp">
             <button className="btn-primary" onClick={() => setView('chat')}>
@@ -374,7 +374,7 @@ function App() {
               <div className="line short"></div>
               <div className="line mid"></div>
             </div>
-            <div className="visual-badge">AI Analysis</div>
+            <div className="visual-badge">Precision RAG</div>
           </div>
           <div className="visual-circle animate-pulse-slow"></div>
         </div>

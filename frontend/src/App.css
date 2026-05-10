@@ -269,6 +269,36 @@
   -webkit-text-fill-color: transparent;
 }
 
+.badge {
+  display: inline-block;
+  padding: 8px 16px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--accent-primary);
+  border-radius: 100px;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 24px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  backdrop-filter: blur(4px);
+}
+
+.dark .badge {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.hero-subtitle {
+  font-size: 20px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 600px;
+  margin-bottom: 48px;
+  font-weight: 400;
+  opacity: 0.9;
+}
+
 .hero-visual {
   position: relative;
   display: flex;
