@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
@@ -16,34 +16,33 @@ class ChatRequest(BaseModel):
     active_file: Optional[str] = None
 
 @router.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
     
     upload_path = os.path.join(Config.UPLOAD_DIR, file.filename)
     
-    # Save file first
+    # Save file instantly
     with open(upload_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    try:
-        # Check if already indexed
-        indexed_files = bot.doc_service.get_indexed_files()
-        if file.filename.lower() in indexed_files:
-            return {
-                "filename": file.filename,
-                "status": "already_indexed",
-                "message": "File is already in the knowledge base."
-            }
-
-        num_chunks = await bot.process_new_pdf(upload_path)
+    # Check if already indexed
+    indexed_files = bot.doc_service.get_indexed_files()
+    if file.filename.lower() in indexed_files:
         return {
             "filename": file.filename,
-            "status": "success",
-            "chunks_created": num_chunks
+            "status": "already_indexed",
+            "message": "File is already in the knowledge base."
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    # Parallel Background Ingestion
+    background_tasks.add_task(bot.process_new_pdf, upload_path)
+    
+    return {
+        "filename": file.filename,
+        "status": "processing",
+        "message": "File upload complete. Indexing in background..."
+    }
 
 @router.get("/files")
 async def get_files():

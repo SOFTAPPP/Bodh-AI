@@ -60,12 +60,18 @@ class VectorService:
         print("--- VectorService: Saving Index... ---")
         self.save_index()
 
-    def search(self, query: str, k: int = Config.TOP_K, filter_dict: Optional[dict] = None):
-        """Performs a similarity search with optional filtering."""
+    def search(self, query: str, k: int = Config.TOP_K, filter_dict: Optional[dict] = None, embedding: Optional[List[float]] = None):
+        """Performs a similarity search using either a query string or a pre-computed embedding."""
         if not self.vector_store:
             return []
         
-        # Standard similarity search is much faster than MMR for high-volume chats
+        if embedding:
+            return self.vector_store.similarity_search_by_vector(
+                embedding,
+                k=k,
+                filter=filter_dict
+            )
+            
         return self.vector_store.similarity_search(
             query,
             k=k,

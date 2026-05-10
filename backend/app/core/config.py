@@ -24,9 +24,9 @@ class Config:
     FALLBACK_MODEL = "gpt-4o-mini"
     
     # RAG Settings
-    CHUNK_SIZE = 1000
-    CHUNK_OVERLAP = 200
-    TOP_K = 15 
+    CHUNK_SIZE = 1200
+    CHUNK_OVERLAP = 300
+    TOP_K = 14 
 
 # Ensure directories exist
 os.makedirs(Config.UPLOAD_DIR, exist_ok=True)

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, type JSX } from 'react';
 import { Upload, Send, FileText, Bot, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon, Home } from 'lucide-react';
 import './App.css';
 
@@ -113,18 +113,18 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         setCurrentFile(data.filename);
-        
-        const isNew = data.status === 'success';
-        const msg = isNew 
-          ? `Successfully uploaded and indexed **${data.filename}**.` 
-          : `**${data.filename}** is already in the knowledge base. Switched context to it.`;
+
+        const isAlreadyIndexed = data.status === 'already_indexed';
+        const msg = isAlreadyIndexed
+          ? `**${data.filename}** is ready.`
+          : `Successfully uploaded **${data.filename}**. Continue with your query`;
 
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'bot',
           content: msg
         }]);
-        
+
         await fetchFiles(); // Refresh list
         setView('chat');
       }
@@ -226,38 +226,106 @@ function App() {
       );
     }
 
-    return content.split('\n').map((line, i) => {
+    const lines = content.split('\n');
+    const renderedElements: JSX.Element[] = [];
+    let currentTable: string[][] = [];
+    let isInTable = false;
+
+    const pushTable = (index: number) => {
+      if (currentTable.length > 0) {
+        const tableKey = `table-${index}`;
+        // Detect if it's a header or just rows
+        const hasHeader = currentTable.length > 0;
+        
+        renderedElements.push(
+          <div key={tableKey} className="table-container streaming-table">
+            <table>
+              {hasHeader && (
+                <thead>
+                  <tr>
+                    {currentTable[0].map((cell, idx) => (
+                      <th key={idx}>{renderInline(cell)}</th>
+                    ))}
+                  </tr>
+                </thead>
+              )}
+              <tbody>
+                {currentTable.slice(1).map((row, rowIdx) => (
+                  <tr key={rowIdx}>
+                    {row.map((cell, cellIdx) => (
+                      <td key={cellIdx}>{renderInline(cell)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+      currentTable = [];
+      isInTable = false;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const trimmedLine = line.trim();
-      if (!trimmedLine) return <div key={i} style={{ height: '8px' }}></div>;
+
+      const isTableRow = trimmedLine.startsWith('|') && trimmedLine.endsWith('|');
+      const isTableDivider = isTableRow && trimmedLine.includes('---');
+
+      if (isTableRow) {
+        if (!isTableDivider) {
+          isInTable = true;
+          const cells = trimmedLine.split('|').filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map(c => c.trim());
+          currentTable.push(cells);
+        }
+        
+        // If it's the last line and we're in a table, push it now
+        if (i === lines.length - 1 && isInTable) {
+          pushTable(i);
+        }
+        continue;
+      } else if (isInTable) {
+        pushTable(i);
+      }
+
+      if (!trimmedLine) {
+        renderedElements.push(<div key={i} style={{ height: '8px' }}></div>);
+        continue;
+      }
 
       const isBullet = /^[-*•]\s+/.test(trimmedLine);
       const text = trimmedLine.replace(/^[-*•]+\s+/, '');
-      const isCategoryHeader = /^(\*\*.*?\*\*:?|.*?:\s*)$/.test(trimmedLine) && !isBullet && trimmedLine.length < 50;
+      const isCategoryHeader = (/^(\*\*.*?\*\*:?|.*?:\s*)$/.test(trimmedLine) && !isBullet && trimmedLine.length < 60);
 
-      const parts = text.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g);
-      const renderedLine = parts.map((part, idx) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={idx}>{part.slice(2, -2)}</strong>;
-        }
-        if (part.startsWith('[') && part.includes('](')) {
-          const match = part.match(/\[(.*?)\]\((.*?)\)/);
-          if (match) {
-            return (
-              <a key={idx} href={match[2]} target="_blank" rel="noopener noreferrer" className="message-link">
-                {match[1]}
-              </a>
-            );
-          }
-        }
-        return part;
-      });
-
-      return (
+      renderedElements.push(
         <div key={i} className={`${isBullet ? 'bullet-line' : 'text-line'} ${isCategoryHeader ? 'category-header' : ''}`}>
           {isBullet && <span className="bullet-dot">•</span>}
-          <span>{renderedLine}</span>
+          <span>{renderInline(text)}</span>
         </div>
       );
+    }
+
+    return renderedElements;
+  };
+
+  const renderInline = (text: string) => {
+    const parts = text.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g);
+    return parts.map((part, idx) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={idx}>{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith('[') && part.includes('](')) {
+        const match = part.match(/\[(.*?)\]\((.*?)\)/);
+        if (match) {
+          return (
+            <a key={idx} href={match[2]} target="_blank" rel="noopener noreferrer" className="message-link">
+              {match[1]}
+            </a>
+          );
+        }
+      }
+      return part;
     });
   };
 
@@ -286,7 +354,7 @@ function App() {
             of Your <span>Documents</span>
           </h1>
           <p className="hero-subtitle animate-slideUp">
-            BodhAI uses advanced RAG technology to provide high-precision answers 
+            BodhAI uses advanced RAG technology to provide high-precision answers
             from your PDFs with zero hallucinations and verbatim evidence.
           </p>
           <div className="hero-actions animate-slideUp">
@@ -389,8 +457,8 @@ function App() {
                   <p className="empty-files-hint">No files indexed yet.</p>
                 )}
                 {indexedFiles.map((file) => (
-                  <div 
-                    key={file} 
+                  <div
+                    key={file}
                     className={`file-item ${currentFile === file ? 'active' : ''}`}
                     onClick={() => setCurrentFile(file)}
                   >

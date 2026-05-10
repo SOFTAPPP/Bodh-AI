@@ -18,94 +18,87 @@ class LLMService:
         self.reasoning_llm = self.llm
         self.generation_llm = self.llm
 
-    async def contextualize_query(self, query: str, history: List[Dict[str, str]]) -> str:
-        """Rephrases follow-up questions for RAG. Optimized for long-chat latency."""
-        if not history or len(query.split()) < 3:
-            return query
-            
-        # Aggressive Pruning: Only take the last 2 exchanges to minimize latency in long chats
-        trimmed_history = []
-        for m in history[-2:]:
-            content = m['content'][:200] + "..." if len(m['content']) > 200 else m['content']
-            trimmed_history.append(f"{m['role'].capitalize()}: {content}")
+    async def analyze_query(self, query: str, history: List[Dict[str, str]]) -> Dict:
+        """Optimized query analysis with ultra-low latency."""
+        is_followup = len(history) > 0
         
-        history_str = "\n".join(trimmed_history)
+        system_prompt = """You are a high-precision RAG Analysis Engine. Output JSON ONLY.
+        {
+        "standalone_query": "The rephrased query for standalone context",
+        "domain": "legal|medical|hr|financial|academic|general",
+        "intent": "fact_extraction|complex_analysis"
+        }
         
-        system_prompt = (
-            "Given the conversation history and a follow-up question, rephrase it into a standalone question. "
-            "Be extremely concise. Output ONLY the question."
-        )
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", f"HISTORY:\n{history_str}\n\nFOLLOW-UP: {query}")
-        ])
-        
-        try:
-            response = await self.reasoning_llm.ainvoke(prompt)
-            return response.content.strip()
-        except Exception:
-            return query
+        CRITICAL RULES:
+        1. REPHRASE: If this is a followup, incorporate necessary context from history into the standalone_query.
+        2. INTENT CLASSIFICATION:
+           - 'fact_extraction': Simple lookups (What, Who, When, Where, List of X).
+           - 'complex_analysis': Reasoning, Comparison, Evaluation, Impact, Why, How, Contradictions, or Judicial-style questions.
+        3. DOMAIN: Detect the primary subject matter of the query."""
 
-    async def detect_intent_and_entities(self, query: str) -> Dict[str, Optional[str]]:
-        """Identifies names, professional entities, or specific files mentioned and classifies the domain."""
-        system_prompt = (
-            "You are an expert intent classifier. Analyze the query and extract entities and domain in JSON format.\n"
-            "DOMAINS:\n"
-            "- 'legal': Contracts, case law, regulations, statutes.\n"
-            "- 'medical': Clinical records, lab reports, medical journals.\n"
-            "- 'hr': Resumes, job descriptions, employee handbooks.\n"
-            "- 'general': Everything else.\n\n"
-            "EXTRACT:\n"
-            "{'person_name': str|null, 'topic': str|null, 'domain': 'legal'|'medical'|'hr'|'general'}"
-        )
-        
+        history_context = ""
+        if is_followup:
+            last = history[-1]
+            history_context = f"PREV: {last['content'][:80]}\n"
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
-            ("human", query)
+            ("human", f"{history_context}Q: {query}")
         ])
-        
+
         try:
-            response = await self.reasoning_llm.ainvoke(prompt)
-            import json
-            import re
+            # Limit tokens for instant JSON generation
+            response = await self.reasoning_llm.ainvoke(prompt, config={"max_tokens": 100})
+            import json, re
             match = re.search(r'\{.*\}', response.content, re.DOTALL)
             if match:
-                data = json.loads(match.group())
-                # Default to general if not specified
-                if 'domain' not in data:
-                    data['domain'] = 'general'
-                return data
-            return {"person_name": None, "topic": None, "domain": "general"}
+                return json.loads(match.group())
+            return {"standalone_query": query, "domain": "general", "intent": "fact_extraction"}
         except Exception:
-            return {"person_name": None, "topic": None, "domain": "general"}
+            return {"standalone_query": query, "domain": "general", "intent": "fact_extraction"}
 
-    async def generate_response(self, query: str, context: str, domain: str = "general") -> AsyncIterable[str]:
-        """Generates the final answer using GPT-4o-mini with domain-aware evidence enforcement."""
+    def _get_domain_protocol(self, domain: str) -> str:
+        protocols = {
+            "legal": "⚖️ SUPREME FORENSIC ANALYST: You are a Lead Digital Forensics Expert. Distinguish between 'Allegations' and 'Technical Artifacts'. When asked for missing evidence, avoid generic procedural reports; instead, mandate specific technical artifacts: Multi-Factor Authentication (MFA) logs, Endpoint Detection & Response (EDR) telemetry, Network Access Control (NAC) logs, RAM forensics, Malware investigation reports, and Employee Workstation activity logs. Always conclude with a 'Causality Statement' explaining how this evidence resolves the conflict between intent and exploit.",
+            "medical": "🏥 CLINICAL SPECIALIST: You are a Medical Informatics Lead. Focus on diagnostic markers, lab values, and clinical pathways. Be extremely precise. Conclude with the 'Clinical Significance' of the findings.",
+            "hr": "👤 EXECUTIVE RECRUITER: You are a Talent Strategy Analyst. Focus on skill gap analysis, cultural alignment, and quantifiable impact. Conclude with a 'Strategic Recommendation'.",
+            "financial": "💰 FORENSIC AUDITOR: You are a Lead Financial Examiner. Focus on transaction anomalies, ledger reconciliation, and regulatory risk. Conclude with an 'Audit Risk Assessment'.",
+            "academic": "🎓 SCHOLARLY REVIEWER: You are a Senior Research Editor. Focus on methodology, validity, and contribution to the field. Conclude with 'Research Implications'.",
+            "general": "🔍 ANALYTICAL INTELLIGENCE: You are a high-performance reasoning engine. Provide deep, multi-layered analysis with zero fluff."
+        }
+        return protocols.get(domain, protocols["general"])
+
+    async def generate_response(self, query: str, context: str, domain: str = "general", intent: str = "fact_extraction") -> AsyncIterable[str]:
+        """Generates a hybrid response: Narrative Synthesis + Forensic Grounding."""
+        protocol = self._get_domain_protocol(domain)
         
-        include_evidence = (domain == "legal")
+        format_section = (
+            "FORMATTING GUIDELINES:\n"
+            "1. RESPONSE STRUCTURE:\n"
+            "   - IF intent='complex_analysis': Begin with a sharp narrative synthesis (1-2 sentences). Use Markdown Tables for comparisons or structured bullets for evidence. ALWAYS end with a final 'Concluding Synthesis' sentence that ties the analysis together.\n"
+            "   - IF intent='fact_extraction': Provide a direct statement. Use bullets ONLY for lists of 3+ items.\n"
+            "2. STYLE: Professional, forensic, and decisive. No filler.\n"
+            "3. VISUALS: Use bold for critical artifacts. Use tables for multi-party comparisons.\n"
+            "4. NO LABELS: Never use 'Intro:' or 'Conclusion:' labels. Start and end immediately."
+        )
+
+        system_prompt = f"""You are a Supreme Document Intelligence Engine.
+        {protocol}
         
-        # Best RAG Prompt (Production Ready) + Strict Rules
-        system_prompt = f"""You are a Retrieval-Augmented Generation (RAG) system.
+        CURRENT INTENT: {intent}
+        
+        BEHAVIORAL RULES:
+        1. LOGICAL SYNTHESIS: Connect context pieces into a unified forensic answer.
+        2. TABULAR COMPARISON: If the user asks for contradictions, differences, or a comparison between parties, use a Markdown Table with columns like 'Point of Conflict', 'Prosecution/Party A', and 'Defense/Party B'.
+        3. EXHAUSTIVE RETRIEVAL: Do not miss any relevant details found in the text.
+        4. STRICT GROUNDING: Stay 100% within the provided CONTEXT. If a fact (e.g., 'Genomic Data', 'Wearables') is not in the text, you MUST NOT include it.
+        5. INTELLIGENT APPLICATION: You ARE allowed to synthesize and apply the facts found in the document to answer reasoning, hypothetical, or design questions. However, your logic must be built solely using the 'building blocks' (technologies, data, and outcomes) mentioned in the context.
+        6. ZERO SPECULATION: Never guess or invent information that isn't supported by the context's logic.
+        
+        {format_section}
 
-RULES:
-- Use ONLY provided context
-- Do NOT use external knowledge
-- Do NOT hallucinate or expand
-- If answer is not in context, respond ONLY with: "Not mentioned in the provided context."
-- Keep answers concise and factual
-- Strict mode: no external knowledge, no inference expansion, no extra bullet points.
-- "Each answer must be grounded in one or more exact retrieved chunks."
-- "Do not reuse identical evidence text across multiple answers unless necessary."
-{'- You MUST provide exact evidence quotes in the Evidence section.' if include_evidence else '- Do NOT provide an Evidence or Source section. Provide ONLY the Answer.'}
-
-OUTPUT FORMAT:
-Answer:
-<final answer>
-{'\nEvidence:\n<exact supporting text from context>' if include_evidence else ''}
-
-CONTEXT:
-{{context}}"""
+        CONTEXT:
+        {{context}}"""
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),

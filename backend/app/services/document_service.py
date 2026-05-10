@@ -11,21 +11,37 @@ class DocumentService:
             separators=["\n\n", "\n", ".", " ", ""]
         )
 
+    def get_domain_from_content(self, text: str) -> str:
+        """Heuristic-based domain detection for high-speed categorization."""
+        text = text.lower()
+        if any(kw in text for kw in ["court", "plaintiff", "defendant", "judgment", "legal", "petitioner"]):
+            return "legal"
+        if any(kw in text for kw in ["patient", "diagnosis", "symptoms", "medical", "clinical", "hospital"]):
+            return "medical"
+        if any(kw in text for kw in ["experience", "education", "skills", "cv", "resume", "work history"]):
+            return "hr"
+        if any(kw in text for kw in ["invoice", "bill", "payment", "tax", "financial", "pricing"]):
+            return "financial"
+        if any(kw in text for kw in ["methodology", "abstract", "references", "research", "conclusion"]):
+            return "academic"
+        return "general"
+
     def process_pdf(self, file_path: str):
-        """Loads and splits a PDF into optimized chunks."""
-        # PyMuPDF is faster and handles complex layouts better than PyPDF
+        """Loads and splits a PDF into optimized chunks with automatic domain detection."""
         loader = PyMuPDFLoader(file_path)
         documents = loader.load()
         
         file_name = os.path.basename(file_path).lower()
         
-        # Enrich metadata for domain-specific filtering
+        # Detect domain based on first 2000 chars
+        sample_text = "".join([d.page_content for d in documents[:2]])
+        detected_domain = self.get_domain_from_content(sample_text)
+        
         chunks = self.text_splitter.split_documents(documents)
         for i, chunk in enumerate(chunks):
             chunk.metadata["chunk_index"] = i
             chunk.metadata["source_file"] = file_name
-            # You can add logic here to detect "domain" (Legal, Resume, etc.) 
-            # based on keywords in the first few pages.
+            chunk.metadata["domain"] = detected_domain
             
         return chunks
 
