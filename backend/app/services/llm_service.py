@@ -81,10 +81,12 @@ class LLMService:
             return {"person_name": None, "topic": None, "domain": "general"}
 
     async def generate_response(self, query: str, context: str, domain: str = "general") -> AsyncIterable[str]:
-        """Generates the final answer using GPT-4o-mini with Strict RAG enforcement."""
+        """Generates the final answer using GPT-4o-mini with domain-aware evidence enforcement."""
+        
+        include_evidence = (domain == "legal")
         
         # Best RAG Prompt (Production Ready) + Strict Rules
-        system_prompt = """You are a Retrieval-Augmented Generation (RAG) system.
+        system_prompt = f"""You are a Retrieval-Augmented Generation (RAG) system.
 
 RULES:
 - Use ONLY provided context
@@ -92,20 +94,18 @@ RULES:
 - Do NOT hallucinate or expand
 - If answer is not in context, respond ONLY with: "Not mentioned in the provided context."
 - Keep answers concise and factual
-- "Only use phrases present in retrieved context. Do NOT expand or explain beyond source."
 - Strict mode: no external knowledge, no inference expansion, no extra bullet points.
-- "Each answer must be grounded in one or more exact retrieved chunks. Do not merge unrelated chunks unless explicitly relevant."
+- "Each answer must be grounded in one or more exact retrieved chunks."
 - "Do not reuse identical evidence text across multiple answers unless necessary."
+{'- You MUST provide exact evidence quotes in the Evidence section.' if include_evidence else '- Do NOT provide an Evidence or Source section. Provide ONLY the Answer.'}
 
 OUTPUT FORMAT:
 Answer:
 <final answer>
-
-Evidence:
-<exact supporting text from context>
+{'\nEvidence:\n<exact supporting text from context>' if include_evidence else ''}
 
 CONTEXT:
-{context}"""
+{{context}}"""
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Send, FileText, Bot, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon } from 'lucide-react';
+import { Upload, Send, FileText, Bot, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon, Home } from 'lucide-react';
 import './App.css';
 
 interface Message {
@@ -10,6 +10,7 @@ interface Message {
 }
 
 function App() {
+  const [view, setView] = useState<'landing' | 'features' | 'chat'>('landing');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -69,8 +70,10 @@ function App() {
   };
 
   useEffect(() => {
-    scrollToBottom(messages.length > 0 && !isThinking);
-  }, [messages, isThinking]);
+    if (view === 'chat') {
+      scrollToBottom(messages.length > 0 && !isThinking);
+    }
+  }, [messages, isThinking, view]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -94,6 +97,8 @@ function App() {
           role: 'bot',
           content: `Successfully uploaded **${data.filename}**. You can now ask questions about it!`
         }]);
+        // Auto-switch to chat when file is uploaded from landing or features
+        setView('chat');
       }
     } catch (error) {
       console.error('Upload failed:', error);
@@ -151,7 +156,6 @@ function App() {
           if (chunk) {
             streamedContent += chunk;
             setIsThinking(false);
-            // Update the message in the state as it streams
             setMessages(prev => {
               const last = prev[prev.length - 1];
               if (last && last.id === botMsgId) {
@@ -174,7 +178,6 @@ function App() {
     }
   };
 
-  // Helper to render message content efficiently
   const renderMessageContent = (content: string, isThinking: boolean, role: string) => {
     if (!content && role === 'bot') {
       return (
@@ -228,117 +231,209 @@ function App() {
     });
   };
 
-  return (
-    <div className="app-container">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="logo">
-          <div className="logo-icon">
-            <Bot size={24} color="white" />
-          </div>
-          <h2>BodhAI</h2>
+  const LandingView = () => (
+    <div className="landing-container view-transition">
+      <nav className="landing-nav">
+        <div className="logo-group">
+          <Bot className="logo-icon-nav" />
+          <span className="logo-text">BodhAI</span>
         </div>
-
-        <div className="upload-section">
-          <label className={`upload-card ${isUploading ? 'loading' : ''}`}>
-            <input type="file" accept=".pdf" onChange={handleFileUpload} hidden />
-            <Upload size={32} className="upload-icon" />
-            <p>{isUploading ? 'Processing...' : 'Upload Files'}</p>
-            <span>Supports .pdf files</span>
-          </label>
+        <div className="nav-links">
+          <button onClick={() => setView('landing')} className={view === 'landing' ? 'active' : ''}>Home</button>
+          <button onClick={() => setView('features')} className={view === 'features' ? 'active' : ''}>Features</button>
+          <button onClick={() => setView('chat')} className={view === 'chat' ? 'active' : ''}>Dashboard</button>
         </div>
+        <button className="theme-toggle-nav" onClick={() => setDarkMode(!darkMode)}>
+          {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
+      </nav>
 
-        {currentFile && (
-          <div className="file-info fade-in">
-            <div className="file-pill">
-              <FileText size={16} />
-              <span>{currentFile}</span>
-              <CheckCircle2 size={14} color="#10b981" />
-            </div>
-          </div>
-        )}
-
-        <div className="sidebar-footer">
-          <p>Demo Version 1.0</p>
-        </div>
-      </aside>
-
-      <main className="chat-area">
-        <header className="chat-header">
-          <h3>Chat Interface</h3>
-          <div className="header-actions">
-            <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
-              {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+      <section className="hero-section hero-gradient">
+        <div className="hero-content">
+          <div className="badge animate-fadeIn">New: Enterprise PDF Intelligence</div>
+          <h1 className="hero-title animate-slideUp">
+            Unlock the Secrets <br />
+            of Your <span>Documents</span>
+          </h1>
+          <p className="hero-subtitle animate-slideUp">
+            BodhAI uses advanced RAG technology to provide high-precision answers 
+            from your PDFs with zero hallucinations and verbatim evidence.
+          </p>
+          <div className="hero-actions animate-slideUp">
+            <button className="btn-primary" onClick={() => setView('chat')}>
+              Try BodhAI Now <Send size={18} />
             </button>
-            <div className="status-indicator">
-              <div className={`dot ${currentFile ? 'active' : ''}`}></div>
-              {currentFile ? 'AI Ready' : 'Upload a file to start'}
-            </div>
+            <button className="btn-secondary" onClick={() => setView('features')}>
+              Explore Features
+            </button>
           </div>
-        </header>
-
-        <div className="messages-container">
-          {messages.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon"><Bot size={54} strokeWidth={1.5} /></div>
-              <h2>PDF Intelligence</h2>
-              <p>Upload your documents and let's unlock their secrets together.</p>
+        </div>
+        <div className="hero-visual animate-float">
+          <div className="visual-card glass-card">
+            <FileText size={48} className="visual-icon" />
+            <div className="visual-lines">
+              <div className="line long"></div>
+              <div className="line short"></div>
+              <div className="line mid"></div>
             </div>
-          )}
+            <div className="visual-badge">AI Analysis</div>
+          </div>
+          <div className="visual-circle animate-pulse-slow"></div>
+        </div>
+      </section>
+    </div>
+  );
 
-          {messages.map((msg) => (
-            <div key={msg.id} className={`message-wrapper ${msg.role}`}>
-              <div className="message-icon">
-                {msg.role === 'bot' ? <Bot size={20} /> : <User size={20} />}
+  const FeaturesView = () => (
+    <div className="features-container view-transition">
+      <nav className="landing-nav">
+        <div className="logo-group">
+          <Bot className="logo-icon-nav" />
+          <span className="logo-text">BodhAI</span>
+        </div>
+        <div className="nav-links">
+          <button onClick={() => setView('landing')} className={view === 'landing' ? 'active' : ''}>Home</button>
+          <button onClick={() => setView('features')} className={view === 'features' ? 'active' : ''}>Features</button>
+          <button onClick={() => setView('chat')} className={view === 'chat' ? 'active' : ''}>Dashboard</button>
+        </div>
+        <button className="theme-toggle-nav" onClick={() => setDarkMode(!darkMode)}>
+          {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
+      </nav>
+
+      <header className="features-header">
+        <h2>Intelligent Features</h2>
+        <p>Built for precision, speed, and absolute accuracy.</p>
+      </header>
+
+      <div className="features-grid">
+        {[
+          { icon: <CheckCircle2 size={32} />, title: 'Zero Hallucination', desc: 'Strict grounding logic ensures every answer is backed by document facts.' },
+          { icon: <Bot size={32} />, title: 'Verbatim Evidence', desc: 'Get exact quotes and chunk references for every response generated.' },
+          { icon: <Mic size={32} />, title: 'Voice Intelligence', desc: 'Natural voice-to-text integration for hands-free document analysis.' },
+          { icon: <Loader2 size={32} />, title: 'Rapid Ingestion', desc: 'Proprietary pipeline processes massive PDFs in seconds with local embeddings.' },
+          { icon: <Sun size={32} />, title: 'Adaptive UI', desc: 'Seamlessly switch between Dark and Light modes for any environment.' },
+          { icon: <FileText size={32} />, title: 'Multi-Doc RAG', desc: 'Query across multiple documents with intelligent cross-referencing.' }
+        ].map((feature, i) => (
+          <div key={i} className="feature-card glass-card">
+            <div className="feature-icon-wrapper">{feature.icon}</div>
+            <h3>{feature.title}</h3>
+            <p>{feature.desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="app-root">
+      {view === 'landing' && <LandingView />}
+      {view === 'features' && <FeaturesView />}
+      {view === 'chat' && (
+        <div className="app-container view-transition">
+          <aside className="sidebar">
+            <div className="logo" onClick={() => setView('landing')} style={{ cursor: 'pointer' }}>
+              <div className="logo-icon">
+                <Bot size={24} color="white" />
               </div>
-              <div className="message-content">
-                <div className={`message-bubble ${!msg.content && msg.role === 'bot' ? 'pulse' : ''}`}>
-                  {renderMessageContent(msg.content, isThinking, msg.role)}
+              <h2>BodhAI</h2>
+            </div>
+
+            <div className="upload-section">
+              <label className={`upload-card ${isUploading ? 'loading' : ''}`}>
+                <input type="file" accept=".pdf" onChange={handleFileUpload} hidden />
+                <Upload size={32} className="upload-icon" />
+                <p>{isUploading ? 'Processing...' : 'Upload Files'}</p>
+                <span>Supports .pdf files</span>
+              </label>
+            </div>
+
+            {currentFile && (
+              <div className="file-info fade-in">
+                <div className="file-pill">
+                  <FileText size={16} />
+                  <span>{currentFile}</span>
+                  <CheckCircle2 size={14} color="#10b981" />
                 </div>
-                {msg.sources && msg.sources.length > 0 && (
-                  <div className="sources-container">
-                    <p className="source-label">Sources:</p>
-                    <div className="source-chips">
-                      {msg.sources.map((s, i) => (
-                        <span key={i} className="source-chip">
-                          Page {s.page}
-                        </span>
-                      ))}
+              </div>
+            )}
+
+            <div className="sidebar-nav">
+              <button onClick={() => setView('landing')}><Home size={18} /> Home</button>
+              <button onClick={() => setView('features')}><Bot size={18} /> Features</button>
+            </div>
+
+            <div className="sidebar-footer">
+              <p>Demo Version 1.0</p>
+            </div>
+          </aside>
+
+          <main className="chat-area">
+            <header className="chat-header">
+              <h3>Chat Interface</h3>
+              <div className="header-actions">
+                <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
+                  {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+                </button>
+                <div className="status-indicator">
+                  <div className={`dot ${currentFile ? 'active' : ''}`}></div>
+                  {currentFile ? 'AI Ready' : 'Upload a file to start'}
+                </div>
+              </div>
+            </header>
+
+            <div className="messages-container">
+              {messages.length === 0 && (
+                <div className="empty-state">
+                  <div className="empty-icon"><Bot size={54} strokeWidth={1.5} /></div>
+                  <h2>PDF Intelligence</h2>
+                  <p>Upload your documents and let's unlock their secrets together.</p>
+                </div>
+              )}
+
+              {messages.map((msg) => (
+                <div key={msg.id} className={`message-wrapper ${msg.role}`}>
+                  <div className="message-icon">
+                    {msg.role === 'bot' ? <Bot size={20} /> : <User size={20} />}
+                  </div>
+                  <div className="message-content">
+                    <div className={`message-bubble ${!msg.content && msg.role === 'bot' ? 'pulse' : ''}`}>
+                      {renderMessageContent(msg.content, isThinking, msg.role)}
                     </div>
                   </div>
-                )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div className="input-container">
+              <div className="input-wrapper">
+                <input
+                  type="text"
+                  placeholder="Ask a question about the PDF..."
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                />
+                <button
+                  className={`mic-button ${isListening ? 'listening' : ''}`}
+                  onClick={toggleListening}
+                  type="button"
+                  title="Voice Search"
+                >
+                  {isListening ? <MicOff size={20} /> : <Mic size={20} />}
+                </button>
+                <button
+                  className={`send-button ${!input.trim() || isThinking ? 'disabled' : ''}`}
+                  onClick={handleSendMessage}
+                >
+                  <Send size={20} />
+                </button>
               </div>
             </div>
-          ))}
-          <div ref={messagesEndRef} />
+          </main>
         </div>
-
-        <div className="input-container">
-          <div className="input-wrapper">
-            <input
-              type="text"
-              placeholder="Ask a question about the PDF..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-            />
-            <button
-              className={`mic-button ${isListening ? 'listening' : ''}`}
-              onClick={toggleListening}
-              type="button"
-              title="Voice Search"
-            >
-              {isListening ? <MicOff size={20} /> : <Mic size={20} />}
-            </button>
-            <button
-              className={`send-button ${!input.trim() || isThinking ? 'disabled' : ''}`}
-              onClick={handleSendMessage}
-            >
-              <Send size={20} />
-            </button>
-          </div>
-        </div>
-      </main>
+      )}
     </div>
   );
 }
