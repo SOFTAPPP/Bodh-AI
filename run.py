@@ -17,7 +17,7 @@ def run_app():
     # 3. Start Backend
     print("Starting Backend (FastAPI)...")
     backend_process = subprocess.Popen(
-        [backend_python, "-m", "uvicorn", "main:app", "--reload"],
+        [backend_python, "-m", "uvicorn", "app.main:app", "--reload"],
         cwd="backend"
     )
 

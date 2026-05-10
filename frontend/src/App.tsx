@@ -149,18 +149,18 @@ function App() {
 
           const chunk = decoder.decode(value, { stream: true });
           if (chunk) {
-             streamedContent += chunk;
-             setIsThinking(false);
-             // Update the message in the state as it streams
-             setMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last && last.id === botMsgId) {
-                   const updated = [...prev];
-                   updated[updated.length - 1] = { ...last, content: streamedContent };
-                   return updated;
-                }
-                return prev;
-             });
+            streamedContent += chunk;
+            setIsThinking(false);
+            // Update the message in the state as it streams
+            setMessages(prev => {
+              const last = prev[prev.length - 1];
+              if (last && last.id === botMsgId) {
+                const updated = [...prev];
+                updated[updated.length - 1] = { ...last, content: streamedContent };
+                return updated;
+              }
+              return prev;
+            });
           }
         }
       }
@@ -243,7 +243,7 @@ function App() {
           <label className={`upload-card ${isUploading ? 'loading' : ''}`}>
             <input type="file" accept=".pdf" onChange={handleFileUpload} hidden />
             <Upload size={32} className="upload-icon" />
-            <p>{isUploading ? 'Processing...' : 'Upload Legal PDF'}</p>
+            <p>{isUploading ? 'Processing...' : 'Upload Files'}</p>
             <span>Supports .pdf files</span>
           </label>
         </div>

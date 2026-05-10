@@ -3,7 +3,11 @@ uvicorn
 python-multipart
 langchain
 langchain-openai
+langchain-groq
+langchain-community
 faiss-cpu
 pypdf
 python-dotenv
-langchain-community
+sentence-transformers
+tiktoken
+pymupdf
