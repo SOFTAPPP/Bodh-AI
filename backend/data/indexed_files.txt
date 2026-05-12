@@ -1,3 +1,2 @@
 case-file-arjun-maheta.pdf
 aritra-dutta-resume.pdf
-test-rag.pdf

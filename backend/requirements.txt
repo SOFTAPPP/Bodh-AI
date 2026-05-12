@@ -1,13 +1,13 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 langchain
-langchain-openai
 langchain-groq
 langchain-community
+langchain-huggingface
 faiss-cpu
 pypdf
 python-dotenv
 sentence-transformers
-tiktoken
 pymupdf
+numpy

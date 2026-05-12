@@ -2,12 +2,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 
-app = FastAPI(title="BodhAI Elite Production API")
+app = FastAPI(
+    title="Bodh AI — Groq Ultra-Low-Latency RAG Engine",
+    description="Enterprise-grade PDF intelligence powered by Groq + LLaMA 3.3 70B + FAISS",
+    version="3.0.0",
+)
 
 # Security: CORS setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, replace with your frontend URL
+    allow_origins=["*"],  # In production, replace with your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -18,7 +22,12 @@ app.include_router(router)
 
 @app.get("/")
 async def root():
-    return {"status": "online", "engine": "Hybrid GPT-4o-mini + Groq Llama-3"}
+    return {
+        "status": "online",
+        "engine": "Groq LLaMA-3.3-70B + FAISS RAG",
+        "embedding": "sentence-transformers/all-MiniLM-L6-v2 (local)",
+        "inference": "Groq API — ultra-low latency",
+    }
 
 if __name__ == "__main__":
     import uvicorn
