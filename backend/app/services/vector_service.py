@@ -14,6 +14,10 @@ class VectorService:
     - Zero latency to an external API (no network round-trip for embed calls)
     - all-MiniLM-L6-v2 encodes a query in ~10-20ms on CPU
     - 384-dim vectors → compact FAISS index, fast ANN search
+
+    Optimizations:
+    - Metadata filtering by domain and source_file for precision
+    - Domain-aware similarity threshold per search
     """
     _instance = None
 
@@ -92,36 +96,72 @@ class VectorService:
         k: int = Config.TOP_K,
         filter_dict: Optional[dict] = None,
         embedding: Optional[List[float]] = None,
+        similarity_threshold: float = Config.SIMILARITY_THRESHOLD,
+        active_file: Optional[str] = None,
     ) -> list:
         """
-        Similarity search with optional pre-computed embedding.
-        Returns docs filtered by SIMILARITY_THRESHOLD to suppress noise.
+        Similarity search with metadata filtering and domain-aware threshold.
+
+        Parameters:
+        - query: text query string
+        - k: number of chunks to retrieve
+        - filter_dict: optional FAISS metadata filter (e.g., {"domain": "legal"})
+        - embedding: pre-computed embedding (avoids double encode)
+        - similarity_threshold: minimum cosine score to include a chunk
+        - active_file: if set, boosts chunks from this file in the result set
+
+        Returns filtered docs sorted by relevance.
         """
         if not self.vector_store:
             return []
 
         try:
             if embedding is not None:
-                # Use pre-computed embedding → avoids a double encode
-                results_with_scores = self.vector_store.similarity_search_by_vector_with_relevance_scores(
+                # Use _with_score (L2 distance) since _with_relevance_scores is not available for by_vector
+                # L2 distance: lower = more similar. Convert to a 0-1 relevance score.
+                results_with_scores = self.vector_store.similarity_search_by_vector_with_score(
                     embedding, k=k, filter=filter_dict
                 )
+                # Convert L2 distance to relevance score (cosine-similarity-like, 0-1 range)
+                # L2 of 0 → score 1.0, L2 of 2 → score 0.0 (clamped)
+                scored = [
+                    (doc, max(0.0, 1.0 - (score / 2.0)))
+                    for doc, score in results_with_scores
+                ]
             else:
-                results_with_scores = self.vector_store.similarity_search_with_relevance_scores(
+                scored = self.vector_store.similarity_search_with_relevance_scores(
                     query, k=k, filter=filter_dict
                 )
 
             # Filter by similarity threshold to eliminate irrelevant chunks
             filtered = [
-                doc for doc, score in results_with_scores
-                if score >= Config.SIMILARITY_THRESHOLD
+                doc for doc, score in scored
+                if score >= similarity_threshold
             ]
-            print(f"--- VectorService: Retrieved {len(results_with_scores)} chunks, {len(filtered)} above threshold ---")
-            return filtered if filtered else [doc for doc, _ in results_with_scores[:3]]  # always return at least top-3
+
+            # Active file boosting: if user selected a specific file,
+            # ensure at least 50% of results come from that file
+            if active_file and filtered:
+                active_docs = [d for d in filtered if d.metadata.get("source_file", "").lower() == active_file.lower()]
+                other_docs = [d for d in filtered if d.metadata.get("source_file", "").lower() != active_file.lower()]
+
+                # If we have active file docs, interleave them with priority
+                if active_docs:
+                    # Ensure at least half the results are from the active file
+                    target_active = max(len(filtered) // 2, min(len(active_docs), 3))
+                    boosted = active_docs[:target_active] + other_docs[:max(1, len(filtered) - target_active)]
+                    filtered = boosted[:k]
+
+            print(f"--- VectorService: Retrieved {len(scored)} chunks, "
+                  f"{len(filtered)} above threshold (threshold={similarity_threshold}) ---")
+
+            if filtered:
+                return filtered
+            # Always return at least top-3 as fallback
+            return [doc for doc, _ in scored[:3]]
 
         except Exception as e:
             print(f"--- VectorService search error: {e}. Falling back to basic search. ---")
-            # Graceful fallback
             if embedding is not None:
                 return self.vector_store.similarity_search_by_vector(embedding, k=k)
             return self.vector_store.similarity_search(query, k=k)

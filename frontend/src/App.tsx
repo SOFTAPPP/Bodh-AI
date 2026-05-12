@@ -125,7 +125,31 @@ function App() {
           content: msg
         }]);
 
-        await fetchFiles(); // Refresh list
+        // If already indexed, refresh immediately
+        if (isAlreadyIndexed) {
+          await fetchFiles();
+        } else {
+          // Poll for the file to appear in indexed list (background indexing)
+          // Check every 2 seconds, up to 30 seconds max
+          let attempts = 0;
+          const maxAttempts = 15;
+          const pollInterval = setInterval(async () => {
+            attempts++;
+            await fetchFiles();
+            // Check if our file is now in the indexed list
+            const checkResp = await fetch('http://localhost:8000/files');
+            if (checkResp.ok) {
+              const checkData = await checkResp.json();
+              if (checkData.files.some((f: string) => f.toLowerCase() === data.filename.toLowerCase())) {
+                clearInterval(pollInterval);
+              }
+            }
+            if (attempts >= maxAttempts) {
+              clearInterval(pollInterval);
+            }
+          }, 2000);
+        }
+
         setView('chat');
       }
     } catch (error) {
