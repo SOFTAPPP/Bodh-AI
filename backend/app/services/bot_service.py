@@ -9,18 +9,6 @@ import os
 
 
 class PDFChatBot:
-    """
-    Enterprise-grade RAG orchestrator with domain-optimized pipeline.
-
-    Pipeline per query:
-    1. Heuristic classify (0ms) or lightweight Groq classify (follow-ups only)
-    2. [HyDE] Generate hypothetical answer → embed it (bridges semantic gap)
-    3. Async local embedding (~15ms)
-    4. In-process query cache check (cosine sim, ~0ms) — per-domain
-    5. FAISS similarity search with metadata filtering + domain threshold (~5ms)
-    6. Active file boosting (prioritize selected file's chunks)
-    7. Groq streaming generation (TTFT ~200-500ms)
-    """
 
     def __init__(self):
         self.vector_service = VectorService()
@@ -39,16 +27,29 @@ class PDFChatBot:
         query: str,
         history: List[Dict[str, str]],
         active_file: Optional[str] = None,
+        niche_hint: Optional[str] = None,
     ) -> AsyncIterable[str]:
         """
         Full RAG pipeline with async streaming.
         Yields text tokens as soon as Groq starts generating.
+        niche_hint: if provided by the frontend (user selected a niche tab),
+                    skip classification entirely — faster and more accurate.
         """
         import time
         t0 = time.perf_counter()
 
-        # ── Step 1: Classify + Embed (parallel for first turn) ───────────────
-        if not history:
+        # ── Step 1: Classify + Embed ─────────────────────────────────────────
+        if niche_hint:
+            # Frontend already knows the niche — skip LLM classification
+            standalone_query = query
+            intent = {
+                "standalone_query": query,
+                "domain": niche_hint,
+                "intent": "fact_extraction",
+            }
+            query_embedding = await self.vector_service.aembed_query(query)
+            print(f"--- [NICHE HINT] Domain pre-seeded as '{niche_hint}' — skipping classify ---")
+        elif not history:
             # First turn: heuristic classify (0ms) + embed in parallel
             intent_task   = asyncio.create_task(self.llm_service.analyze_query(query, history))
             embed_task    = asyncio.create_task(self.vector_service.aembed_query(query))

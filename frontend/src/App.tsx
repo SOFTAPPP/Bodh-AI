@@ -9,6 +9,46 @@ interface Message {
   sources?: { page: number; source: string }[];
 }
 
+// Demo question chips per niche
+const NICHE_DEMOS: Record<string, { label: string; icon: string; questions: string[] }> = {
+  legal: {
+    label: 'Law Firm',
+    icon: '⚖️',
+    questions: [
+      'What are the confidentiality obligations in this contract?',
+      'Who are the liable parties and what are the penalties?',
+      'Summarize all termination clauses in a table',
+    ],
+  },
+  medical: {
+    label: 'Medical Clinic',
+    icon: '🏥',
+    questions: [
+      "What are the patient's key diagnoses and conditions?",
+      'List all prescribed medications and dosages',
+      'Summarize treatment plan and follow-up instructions',
+    ],
+  },
+  realestate: {
+    label: 'Real Estate',
+    icon: '🏠',
+    questions: [
+      'What properties are available under $3000/month?',
+      'List all lease terms and renewal conditions',
+      'Summarize all obligations of the tenant vs landlord',
+    ],
+  },
+  financial: {
+    label: 'Finance / Audit',
+    icon: '💰',
+    questions: [
+      'Identify any financial anomalies or red flags',
+      'Summarize total revenue, expenses, and net profit',
+      'List all outstanding invoices and payment terms',
+    ],
+  },
+};
+
 function App() {
   const [view, setView] = useState<'landing' | 'features' | 'chat'>('landing');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -19,6 +59,10 @@ function App() {
   const [currentFile, setCurrentFile] = useState<string | null>(null);
   const [indexedFiles, setIndexedFiles] = useState<string[]>([]);
   const [darkMode, setDarkMode] = useState(false);
+  const [activeNiche, setActiveNiche] = useState<string>('legal');
+  const [showLeadModal, setShowLeadModal] = useState(false);
+  const [leadForm, setLeadForm] = useState({ name: '', email: '', business_type: '' });
+  const [leadSent, setLeadSent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
@@ -185,13 +229,16 @@ function App() {
     setMessages(prev => [...prev, botPlaceholder]);
 
     try {
+      const isDemoMode = !currentFile;
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: input,
           history: messages.map(m => ({ role: m.role, content: m.content })),
-          active_file: currentFile
+          active_file: currentFile,
+          niche: activeNiche,
+          demo_mode: isDemoMode,
         }),
       });
 
@@ -205,7 +252,6 @@ function App() {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           const chunk = decoder.decode(value, { stream: true });
           if (chunk) {
             streamedContent += chunk;
@@ -221,6 +267,14 @@ function App() {
             });
           }
         }
+      }
+      // Show lead modal after 3 demo interactions (no file uploaded)
+      if (!currentFile) {
+        setMessages(prev => {
+          const demoMsgs = prev.filter(m => m.role === 'user').length;
+          if (demoMsgs >= 3 && !leadSent) setTimeout(() => setShowLeadModal(true), 1500);
+          return prev;
+        });
       }
     } catch (error) {
       console.error('Chat failed:', error);
@@ -363,7 +417,7 @@ function App() {
         <div className="nav-links">
           <button onClick={() => setView('landing')} className={view === 'landing' ? 'active' : ''}>Home</button>
           <button onClick={() => setView('features')} className={view === 'features' ? 'active' : ''}>Features</button>
-          <button onClick={() => setView('chat')} className={view === 'chat' ? 'active' : ''}>Dashboard</button>
+          <button onClick={() => setView('chat')} className={view === 'chat' ? 'active' : ''}>Live Demo</button>
         </div>
         <button className="theme-toggle-nav" onClick={() => setDarkMode(!darkMode)}>
           {darkMode ? <Sun size={20} /> : <Moon size={20} />}
@@ -372,33 +426,57 @@ function App() {
 
       <section className="hero-section hero-gradient">
         <div className="hero-content">
-          <div className="badge animate-fadeIn">State-of-the-Art Document Intelligence</div>
+          <div className="badge animate-fadeIn">🚀 AI Business Automation — Zero Hallucinations</div>
           <h1 className="hero-title animate-slideUp">
-            Precision Insights <br />
-            From Your <span>Documents</span>
+            Your AI <span>Knowledge</span><br />Employee
           </h1>
           <p className="hero-subtitle animate-slideUp">
-            Enterprise-grade RAG engine designed for absolute accuracy in Legal,
-            Medical, and Financial document intelligence.
+            Upload any business document — contracts, policies, medical records, financial reports — and get instant, forensic-level answers. Built for Law Firms, Clinics, and Real Estate agencies.
           </p>
+
+          {/* Niche tabs */}
+          <div className="niche-tabs animate-slideUp">
+            {Object.entries(NICHE_DEMOS).map(([key, n]) => (
+              <button
+                key={key}
+                className={`niche-tab ${activeNiche === key ? 'active' : ''}`}
+                onClick={() => setActiveNiche(key)}
+              >
+                {n.icon} {n.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Demo questions preview */}
+          <div className="hero-chips animate-slideUp">
+            {NICHE_DEMOS[activeNiche].questions.map((q, i) => (
+              <div key={i} className="hero-chip" onClick={() => { setView('chat'); setTimeout(() => setInput(q), 200); }}>
+                <span className="chip-icon">💬</span> {q}
+              </div>
+            ))}
+          </div>
+
           <div className="hero-actions animate-slideUp">
             <button className="btn-primary" onClick={() => setView('chat')}>
-              Try BodhAI Now <Send size={18} />
+              Try Live Demo <Send size={18} />
             </button>
             <button className="btn-secondary" onClick={() => setView('features')}>
-              Explore Features
+              See Features
             </button>
           </div>
         </div>
         <div className="hero-visual animate-float">
           <div className="visual-card glass-card">
-            <FileText size={48} className="visual-icon" />
+            <div className="visual-niche-icon">{NICHE_DEMOS[activeNiche].icon}</div>
+            <div className="visual-niche-label">{NICHE_DEMOS[activeNiche].label} AI Assistant</div>
             <div className="visual-lines">
               <div className="line long"></div>
               <div className="line short"></div>
               <div className="line mid"></div>
+              <div className="line long"></div>
+              <div className="line short"></div>
             </div>
-            <div className="visual-badge">Precision RAG</div>
+            <div className="visual-badge">⚡ Sub-second RAG</div>
           </div>
           <div className="visual-circle animate-pulse-slow"></div>
         </div>
@@ -449,6 +527,51 @@ function App() {
 
   return (
     <div className="app-root">
+      {/* Lead Capture Modal */}
+      {showLeadModal && !leadSent && (
+        <div className="lead-modal-overlay" onClick={() => setShowLeadModal(false)}>
+          <div className="lead-modal" onClick={e => e.stopPropagation()}>
+            <div className="lead-modal-badge">🎯 Interested in this for your business?</div>
+            <h3>Get a Custom Demo</h3>
+            <p>Leave your details and we'll build a personalized AI assistant for your workflow.</p>
+            <input
+              className="lead-input"
+              placeholder="Your name"
+              value={leadForm.name}
+              onChange={e => setLeadForm(p => ({ ...p, name: e.target.value }))}
+            />
+            <input
+              className="lead-input"
+              placeholder="Business email"
+              value={leadForm.email}
+              onChange={e => setLeadForm(p => ({ ...p, email: e.target.value }))}
+            />
+            <input
+              className="lead-input"
+              placeholder="Business type (e.g. Law Firm, Clinic...)"
+              value={leadForm.business_type}
+              onChange={e => setLeadForm(p => ({ ...p, business_type: e.target.value }))}
+            />
+            <button
+              className="lead-submit"
+              onClick={async () => {
+                if (!leadForm.name || !leadForm.email) return;
+                await fetch('http://localhost:8000/leads', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ ...leadForm, message: `Came from ${activeNiche} demo` }),
+                });
+                setLeadSent(true);
+                setShowLeadModal(false);
+              }}
+            >
+              Get My Custom Demo →
+            </button>
+            <button className="lead-skip" onClick={() => setShowLeadModal(false)}>Maybe later</button>
+          </div>
+        </div>
+      )}
+
       {view === 'landing' && <LandingView />}
       {view === 'features' && <FeaturesView />}
       {view === 'chat' && (
@@ -522,8 +645,28 @@ function App() {
               {messages.length === 0 && (
                 <div className="empty-state">
                   <div className="empty-icon"><Bot size={54} strokeWidth={1.5} /></div>
-                  <h2>PDF Intelligence</h2>
-                  <p>Upload your documents and let's unlock their secrets together.</p>
+                  <h2>AI Knowledge Employee</h2>
+                  <p>Upload a document below, then ask anything. No hallucinations — every answer is grounded in your data.</p>
+                  {/* Niche tabs in chat */}
+                  <div className="chat-niche-tabs">
+                    {Object.entries(NICHE_DEMOS).map(([key, n]) => (
+                      <button
+                        key={key}
+                        className={`niche-tab sm ${activeNiche === key ? 'active' : ''}`}
+                        onClick={() => setActiveNiche(key)}
+                      >
+                        {n.icon} {n.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="chips-hint">Try a demo question ↓</p>
+                  <div className="demo-chips">
+                    {NICHE_DEMOS[activeNiche].questions.map((q, i) => (
+                      <button key={i} className="demo-chip" onClick={() => setInput(q)}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -543,10 +686,20 @@ function App() {
             </div>
 
             <div className="input-container">
+              {/* Inline demo chips above input when no messages */}
+              {messages.length === 0 && (
+                <div className="inline-chips">
+                  {NICHE_DEMOS[activeNiche].questions.map((q, i) => (
+                    <button key={i} className="inline-chip" onClick={() => setInput(q)}>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="input-wrapper">
                 <input
                   type="text"
-                  placeholder="Ask a question about the PDF..."
+                  placeholder={`Ask about a ${NICHE_DEMOS[activeNiche].label.toLowerCase()} document...`}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
