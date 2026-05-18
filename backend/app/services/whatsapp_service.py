@@ -53,9 +53,15 @@ class WhatsAppService:
     def get_user_file(self, phone_number: str) -> Optional[str]:
         return self._user_state.get(phone_number, {}).get("last_file")
 
-    async def set_user_file(self, phone_number: str, filename: str):
+    async def set_user_file(self, phone_number: str, filename: Optional[str]):
         if phone_number not in self._user_state:
-            self._user_state[phone_number] = {"history": []}
+            self._user_state[phone_number] = {"history": [], "last_file": None}
+            
+        current_file = self._user_state[phone_number].get("last_file")
+        if current_file and filename and current_file.lower() != filename.lower():
+            self._user_state[phone_number]["history"] = []
+            print(f"--- [WHATSAPP SESSION] Active document changed to {filename}. Cleared history. ---")
+            
         self._user_state[phone_number]["last_file"] = filename
         await self._save_state()
 

@@ -1,4 +1,6 @@
 import os
+import uuid
+from datetime import datetime, timezone
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.core.config import Config
@@ -53,10 +55,14 @@ class DocumentService:
         chunks = text_splitter.split_documents(documents)
 
         domain_cfg = Config.get_domain_config(detected_domain)
+        doc_id = str(uuid.uuid4())  # Unique identifier for this indexing run
+        upload_ts = datetime.now(timezone.utc).isoformat()
         for i, chunk in enumerate(chunks):
             chunk.metadata["chunk_index"] = i
             chunk.metadata["source_file"] = file_name
             chunk.metadata["domain"] = detected_domain
+            chunk.metadata["document_id"] = doc_id
+            chunk.metadata["upload_timestamp"] = upload_ts
             # Store domain-specific retrieval config in metadata for vector search
             chunk.metadata["top_k"] = domain_cfg["top_k"]
             chunk.metadata["similarity_threshold"] = domain_cfg["similarity_threshold"]

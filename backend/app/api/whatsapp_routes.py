@@ -132,36 +132,82 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     # (history snapshot used for LLM context, saved together with response below)
     history = wa_service.get_user_history(phone_number)
     active_file = wa_service.get_user_file(phone_number)
+    previous_active_file = active_file
 
-    web_files = sorted(list(wa_bot.doc_service_web.get_indexed_files()))
-    wa_files = sorted(list(wa_bot.doc_service_wa.get_indexed_files()))
-    
-    seen = set()
-    all_files = []
-    for f in (web_files + wa_files):
-        if f not in seen:
-            seen.add(f)
-            all_files.append(f)
+    # Check if the last assistant message in history was asking to choose another document
+    last_assistant_msg = ""
+    for turn in reversed(history):
+        if turn.get("role") in ("assistant", "bot"):
+            last_assistant_msg = turn.get("content", "")
+            break
+            
+    is_not_found_fallback = "I could not find this information in the selected document" in last_assistant_msg
+    is_ambiguous_fallback = "I found multiple documents" in last_assistant_msg
+    is_fallback_selection = is_not_found_fallback or is_ambiguous_fallback
+
+    # Use ONLY WhatsApp-platform files (strict isolation)
+    all_files = wa_bot.get_indexed_files()
+
+    if is_fallback_selection and active_file:
+        if is_not_found_fallback:
+            target_list = [f for f in all_files if f.lower() != active_file.lower()]
+        else:
+            target_list = all_files
+        active_file = None  # Clear to force resolution
+        await wa_service.set_user_file(phone_number, None)
+    else:
+        target_list = all_files
             
     prepend_msg = ""
+    is_selection_retry = False
     
-    if not active_file and all_files:
+    if not active_file and target_list:
         text_clean = text.strip()
         selected_file = None
+        
+        # 1. Check numeric selection
         if text_clean.isdigit():
             idx = int(text_clean) - 1
-            if 0 <= idx < len(all_files):
-                selected_file = all_files[idx]
+            if 0 <= idx < len(target_list):
+                selected_file = target_list[idx]
+                is_selection_retry = True
         else:
-            # Check for exact or partial filename match (case-insensitive)
-            matches = [f for f in all_files if text_clean.lower() in f]
+            # 2. Check for exact or partial filename match (case-insensitive)
+            matches = [f for f in target_list if text_clean.lower() in f.lower()]
             if len(matches) == 1:
                 selected_file = matches[0]
+                is_selection_retry = True
+                
+            # 3. Smart Document Detection based on query keywords
+            if not selected_file and len(target_list) > 1:
+                q_words = set(text_clean.lower().split())
+                for f in target_list:
+                    f_name_lower = f.lower()
+                    f_name_no_ext = f_name_lower.replace(".pdf", "")
+                    if any(w in f_name_lower for w in q_words if len(w) > 3) or text_clean.lower() in f_name_no_ext:
+                        selected_file = f
+                        break
                 
         if selected_file:
             active_file = selected_file
             await wa_service.set_user_file(phone_number, selected_file)
-            text = "what is this document all about ??"
+            
+            if is_selection_retry:
+                # Find user's original query before the selection prompt
+                original_query = None
+                for turn in reversed(history):
+                    if turn.get("role") == "user":
+                        content = turn.get("content", "").strip()
+                        if not content.isdigit() and len(content) > 3:
+                            original_query = content
+                            break
+                
+                if original_query:
+                    text = original_query
+                else:
+                    text = "what is this document all about ?"
+                    
+                prepend_msg = f"✅ **{active_file}** selected. \n\n"
 
     print(f"--- [WHATSAPP TEXT ROUTE] Starting LLM ask() generator... ---")
     # Process RAG Query via bot
@@ -170,8 +216,12 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     if prepend_msg:
         response_chunks.append(prepend_msg)
         
+    effective_history = history
+    if active_file and previous_active_file and active_file.lower() != previous_active_file.lower():
+        effective_history = []
+        
     try:
-        async for chunk in wa_bot.ask(query=text, history=history, active_file=active_file):
+        async for chunk in wa_bot.ask(query=text, history=effective_history, active_file=active_file, is_selection_retry=is_selection_retry):
             response_chunks.append(chunk)
 
         full_response = "".join(response_chunks)

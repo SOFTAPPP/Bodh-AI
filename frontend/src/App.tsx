@@ -62,6 +62,7 @@ function App() {
   const [showLeadModal, setShowLeadModal] = useState(false);
   const [leadForm, setLeadForm] = useState({ name: '', email: '', business_type: '' });
   const [leadSent, setLeadSent] = useState(false);
+  const [sessionId] = useState(() => Math.random().toString(36).substring(2, 15));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
@@ -142,6 +143,7 @@ function App() {
     setIsUploading(true);
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('session_id', sessionId);
 
     try {
       const response = await fetch('http://localhost:8000/upload', {
@@ -154,17 +156,18 @@ function App() {
         setCurrentFile(data.filename);
 
         const isAlreadyIndexed = data.status === 'already_indexed';
+        const isReady = data.status === 'ready';
         const msg = isAlreadyIndexed
           ? `**${data.filename}** is ready.`
           : `Successfully uploaded **${data.filename}**. Continue with your query`;
 
-        setMessages(prev => [...prev, {
+        setMessages([{
           id: Date.now().toString(),
           role: 'bot',
           content: msg
         }]);
 
-        if (isAlreadyIndexed) {
+        if (isAlreadyIndexed || isReady) {
           await fetchFiles();
         } else {
           // Poll for the file to appear in indexed list (background indexing)
@@ -231,10 +234,34 @@ function App() {
           active_file: currentFile,
           niche: activeNiche,
           demo_mode: isDemoMode,
+          session_id: sessionId,
         }),
       });
 
       if (!response.ok) throw new Error('Network response was not ok');
+
+      const serverActiveFile = response.headers.get('X-Active-File');
+      if (serverActiveFile && serverActiveFile !== currentFile) {
+        setCurrentFile(serverActiveFile);
+        // Show a brief selection confirmation if this was an auto-selection
+        if (!currentFile) {
+          setMessages(prev => {
+            const updated = [...prev];
+            const placeholderIdx = updated.findIndex(m => m.id === botMsgId);
+            const confirmationMsg = {
+              id: (Date.now() + 2).toString(),
+              role: 'bot' as const,
+              content: `✅ Active document set to **${serverActiveFile}**`
+            };
+            if (placeholderIdx !== -1) {
+              updated.splice(placeholderIdx, 0, confirmationMsg);
+            } else {
+              updated.push(confirmationMsg);
+            }
+            return updated;
+          });
+        }
+      }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -248,15 +275,9 @@ function App() {
           if (chunk) {
             streamedContent += chunk;
             setIsThinking(false);
-            setMessages(prev => {
-              const last = prev[prev.length - 1];
-              if (last && last.id === botMsgId) {
-                const updated = [...prev];
-                updated[updated.length - 1] = { ...last, content: streamedContent };
-                return updated;
-              }
-              return prev;
-            });
+            setMessages(prev =>
+              prev.map(m => m.id === botMsgId ? { ...m, content: streamedContent } : m)
+            );
           }
         }
       }
@@ -594,12 +615,11 @@ function App() {
                 {indexedFiles.map((file) => (
                   <div
                     key={file}
-                    className={`file-item ${currentFile === file ? 'active' : ''}`}
-                    onClick={() => setCurrentFile(file)}
+                    className={`file-item ${currentFile?.toLowerCase() === file.toLowerCase() ? 'active' : ''}`}
                   >
                     <FileText size={16} className="file-item-icon" />
                     <span className="file-item-name" title={file}>{file}</span>
-                    {currentFile === file && <CheckCircle2 size={14} color="#3b82f6" />}
+                    {currentFile?.toLowerCase() === file.toLowerCase() && <CheckCircle2 size={14} color="#3b82f6" />}
                   </div>
                 ))}
               </div>
@@ -619,6 +639,12 @@ function App() {
             <header className="chat-header">
               <h3>Chat Interface</h3>
               <div className="header-actions">
+                {currentFile && (
+                  <div className="active-doc-pill">
+                    <span className="active-doc-dot" />
+                    <span className="active-doc-name" title={currentFile}>{currentFile}</span>
+                  </div>
+                )}
                 <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
                   {darkMode ? <Sun size={20} /> : <Moon size={20} />}
                 </button>

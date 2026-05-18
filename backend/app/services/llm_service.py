@@ -238,7 +238,7 @@ class LLMService:
         BEHAVIORAL RULES:
         1. STRICT GROUNDING: Answer ONLY from the CONTEXT below. Never use external knowledge.
         2. MISSING INFORMATION: If the answer is not in the CONTEXT, respond exactly:
-        "I don't know based on the provided context."
+        "This information was not found in the selected document."
         3. LOGICAL SYNTHESIS: Connect context pieces into a unified, forensic answer.
         4. EXHAUSTIVE RETRIEVAL: Do not skip any relevant detail present in the CONTEXT.
         5. TABULAR COMPARISON: For contradictions/comparisons, use Markdown tables.

@@ -28,7 +28,7 @@ class VectorService:
         self.vector_store = None
         self._index_attempted = False
 
-        print(f"--- VectorService: Initialized → store: {self._store_dir} ---")
+        print(f"--- VectorService: Initialized -> store: {self._store_dir} ---")
 
     @property
     def embeddings(self):
@@ -119,9 +119,9 @@ class VectorService:
 
         Returns filtered docs sorted by relevance.
         """
-        if self.vector_store is None and not self._index_attempted:
-            self._index_attempted = True
-            self.load_index()
+        # Always reload index from disk before searching to guarantee real-time synchronization
+        # across all concurrent API and webhook requests.
+        self.load_index()
 
         if not self.vector_store:
             return []

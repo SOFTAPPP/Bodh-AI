@@ -15,6 +15,7 @@ bot = PDFChatBot()
 # In-memory analytics store (replace with DB for production)
 _query_log: List[dict] = []
 _leads_store: List[dict] = []
+_sessions: dict = {}
 
 DEMO_CONTEXTS = {
     "legal": {
@@ -192,6 +193,7 @@ class ChatRequest(BaseModel):
     active_file: Optional[str] = None
     niche: Optional[str] = None
     demo_mode: Optional[bool] = False
+    session_id: Optional[str] = None
 
 
 class LeadRequest(BaseModel):
@@ -200,8 +202,14 @@ class LeadRequest(BaseModel):
     business_type: str
     message: Optional[str] = None
 
+from fastapi import Form
+
 @router.post("/upload")
-async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_pdf(
+    background_tasks: BackgroundTasks, 
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None)
+):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
@@ -211,18 +219,25 @@ async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(
 
     indexed_files = bot.doc_service.get_indexed_files()
     if file.filename.lower() in indexed_files:
-        return {"filename": file.filename, "status": "already_indexed",
+        return {"filename": file.filename.lower(), "status": "already_indexed",
                 "message": "File is already in the knowledge base."}
 
-    background_tasks.add_task(bot.process_new_pdf, upload_path)
-    return {"filename": file.filename, "status": "processing",
-            "message": "File upload complete. Indexing in background..."}
+    await bot.process_new_pdf(upload_path)
+    
+    # Auto-switch active document for the session
+    if session_id:
+        if session_id not in _sessions:
+            _sessions[session_id] = {"active_file": None}
+        _sessions[session_id]["active_file"] = file.filename.lower()
+
+    return {"filename": file.filename.lower(), "status": "ready",
+            "message": f"'{file.filename}' has been fully indexed and is now active! You can start asking questions about it."}
 
 
 @router.get("/files")
 async def get_files():
-    files = list(bot.doc_service.get_indexed_files())
-    return {"files": files}
+    """Returns only web-platform indexed documents. WhatsApp files are strictly isolated."""
+    return {"files": bot.get_indexed_files()}
 
 
 @router.post("/chat")
@@ -253,29 +268,89 @@ async def chat(request: ChatRequest):
             print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
         return StreamingResponse(chitchat_stream(), media_type="text/plain")
 
-    # Resolve active file if not set
-    active_file = request.active_file
-    web_files = sorted(list(bot.doc_service_web.get_indexed_files()))
-    wa_files = sorted(list(bot.doc_service_wa.get_indexed_files()))
-    all_files = web_files + wa_files
+    # Check if the last assistant message in history was asking to choose another document
+    last_assistant_msg = ""
+    for turn in reversed(request.history):
+        if turn.get("role") in ("assistant", "bot"):
+            last_assistant_msg = turn.get("content", "")
+            break
+
+    is_not_found_fallback = "I could not find this information in the selected document" in last_assistant_msg
+    is_ambiguous_fallback = "I found multiple documents" in last_assistant_msg
+    is_fallback_selection = is_not_found_fallback or is_ambiguous_fallback
+
+    # Resolve session and active file using ONLY web-platform files (strict isolation)
+    session_id = request.session_id or "default"
+    if session_id not in _sessions:
+        _sessions[session_id] = {"active_file": None}
+
+    all_files = bot.get_indexed_files()  # web-only
+
+    # If the UI actively passes an active_file, we MIGHT sync it, but prompt says DO NOT trust frontend-only state.
+    # However, since the user wants to avoid manual switching, we rely on _sessions.
+    previous_active_file = _sessions[session_id].get("active_file")
+    active_file = previous_active_file
+
+    if is_fallback_selection and active_file:
+        if is_not_found_fallback:
+            target_list = [f for f in all_files if f.lower() != active_file.lower()]
+        else:
+            target_list = all_files
+        active_file = None  # Clear to force resolution
+        _sessions[session_id]["active_file"] = None
+    else:
+        target_list = all_files
+        
     prepend_msg = ""
+    is_selection_retry = False
     
-    if not active_file and all_files:
+    if not active_file and target_list:
         text_clean = request.message.strip()
         selected_file = None
+        
+        # 1. Check numeric selection
         if text_clean.isdigit():
             idx = int(text_clean) - 1
-            if 0 <= idx < len(all_files):
-                selected_file = all_files[idx]
+            if 0 <= idx < len(target_list):
+                selected_file = target_list[idx]
+                is_selection_retry = True
         else:
-            # Check for exact or partial filename match (case-insensitive)
-            matches = [f for f in all_files if text_clean.lower() in f]
+            # 2. Check for exact or partial filename match (case-insensitive)
+            matches = [f for f in target_list if text_clean.lower() in f.lower()]
             if len(matches) == 1:
                 selected_file = matches[0]
+                is_selection_retry = True
+            
+            # 3. Smart Document Detection based on query keywords
+            if not selected_file and len(target_list) > 1:
+                q_words = set(text_clean.lower().split())
+                for f in target_list:
+                    f_name_lower = f.lower()
+                    f_name_no_ext = f_name_lower.replace(".pdf", "")
+                    if any(w in f_name_lower for w in q_words if len(w) > 3) or text_clean.lower() in f_name_no_ext:
+                        selected_file = f
+                        break
                 
         if selected_file:
             active_file = selected_file
-            request.message = "what is this document all about ?"
+            _sessions[session_id]["active_file"] = active_file
+            
+            if is_selection_retry:
+                # Find user's original query before the selection prompt
+                original_query = None
+                for turn in reversed(request.history):
+                    if turn.get("role") == "user":
+                        content = turn.get("content", "").strip()
+                        if not content.isdigit() and len(content) > 3:
+                            original_query = content
+                            break
+                
+                if original_query:
+                    request.message = original_query
+                else:
+                    request.message = "what is this document all about ?"
+                    
+                prepend_msg = f"✅ **{active_file}** selected. \n\n"
 
 
     # Pass active niche hint if present to skip heuristic classification
@@ -285,6 +360,12 @@ async def chat(request: ChatRequest):
         "query": request.message,
         "demo": False,
     })
+    
+    # FIX: Clear old conversation chain if document changed
+    effective_history = request.history
+    if active_file and previous_active_file and active_file.lower() != previous_active_file.lower():
+        print(f"--- [SESSION] Active document changed from {previous_active_file} to {active_file}. Clearing history context. ---")
+        effective_history = []
 
     async def bot_stream():
         t_gen_start = time.perf_counter()
@@ -293,9 +374,10 @@ async def chat(request: ChatRequest):
         first = True
         async for chunk in bot.ask(
             request.message,
-            request.history,
+            effective_history,
             active_file,
             niche_hint=request.niche,
+            is_selection_retry=is_selection_retry,
         ):
             if first:
                 print(f"--- [WEB APP RAG] First Token: {time.perf_counter() - t_gen_start:.4f}s ---")
@@ -303,7 +385,18 @@ async def chat(request: ChatRequest):
             yield chunk
         print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
 
-    return StreamingResponse(bot_stream(), media_type="text/plain")
+    # Determine the effective active_file for the response header
+    # (includes auto-selected single-doc case handled inside bot.ask())
+    effective_file = active_file
+    if not effective_file and len(all_files) == 1:
+        effective_file = all_files[0]
+        _sessions[session_id]["active_file"] = effective_file
+
+    headers = {}
+    if effective_file:
+        headers["X-Active-File"] = effective_file
+
+    return StreamingResponse(bot_stream(), media_type="text/plain", headers=headers)
 
 
 @router.get("/demo/{niche}")

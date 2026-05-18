@@ -14,15 +14,15 @@ class Config:
     BASE_DIR = BASE_DIR
     DATA_DIR = os.path.join(BASE_DIR, "data")
 
-    # ── Web App (isolated) ──────────────────────────────────────────────
+    # ── Shared Vector Database & Document Knowledge Base ────────────────
     UPLOAD_DIR        = os.path.join(DATA_DIR, "uploads")
     VECTOR_STORE_DIR  = os.path.join(DATA_DIR, "vector_store")
     INDEXED_FILES_LOG = os.path.join(DATA_DIR, "indexed_files.txt")
 
-    # ── WhatsApp (completely isolated from web app) ─────────────────────
-    WA_UPLOAD_DIR        = os.path.join(DATA_DIR, "wa_uploads")
-    WA_VECTOR_STORE_DIR  = os.path.join(DATA_DIR, "wa_vector_store")
-    WA_INDEXED_FILES_LOG = os.path.join(DATA_DIR, "wa_indexed_files.txt")
+    # Both WhatsApp and Web application point to the same shared database
+    WA_UPLOAD_DIR        = UPLOAD_DIR
+    WA_VECTOR_STORE_DIR  = VECTOR_STORE_DIR
+    WA_INDEXED_FILES_LOG = INDEXED_FILES_LOG
 
     GENERATION_MODEL = "llama-3.3-70b-versatile"
     REASONING_MODEL  = "deepseek-r1-distill-llama-70b"
