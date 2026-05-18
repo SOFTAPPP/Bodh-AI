@@ -205,7 +205,7 @@ async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
-    upload_path = os.path.join(Config.UPLOAD_DIR, file.filename)
+    upload_path = os.path.join(bot.doc_service.upload_dir, file.filename)
     with open(upload_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
@@ -227,6 +227,11 @@ async def get_files():
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
+    import time
+    from datetime import datetime
+    t_start = time.perf_counter()
+    print(f"=== [WEB APP /CHAT START] Time: {datetime.utcnow().isoformat()} | Query: {request.message} ===")
+
     # Fast-path for simple chitchat/greetings
     q = request.message.lower().strip().strip("?").strip("!").strip(".")
     chitchat_phrases = {
@@ -236,20 +241,34 @@ async def chat(request: ChatRequest):
     }
     if q in chitchat_phrases or (len(q.split()) <= 2 and any(w in q for w in ["hi", "hello", "hey", "thanks", "thank", "bye"])):
         async def chitchat_stream():
+            print(f"--- [WEB APP CHITCHAT] Bypassing FAISS. Starting generation stream... ---")
+            t_gen_start = time.perf_counter()
+            first = True
             async for chunk in bot.llm_service.generate_chitchat_response(request.message, request.history):
+                if first:
+                    print(f"--- [WEB APP CHITCHAT] First Token: {time.perf_counter() - t_gen_start:.4f}s ---")
+                    first = False
                 yield chunk
+            print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
         return StreamingResponse(chitchat_stream(), media_type="text/plain")
 
     if request.demo_mode and request.niche and request.niche in DEMO_CONTEXTS:
         demo = DEMO_CONTEXTS[request.niche]
         async def demo_stream():
+            print(f"--- [WEB APP DEMO] Starting domain prompt generator... ---")
+            t_gen_start = time.perf_counter()
+            first = True
             async for chunk in bot.llm_service.generate_response(
                 request.message,
                 demo["context"],
                 domain=demo["niche"],
                 intent="fact_extraction",
             ):
+                if first:
+                    print(f"--- [WEB APP DEMO] First Token: {time.perf_counter() - t_gen_start:.4f}s ---")
+                    first = False
                 yield chunk
+            print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
 
         _query_log.append({
             "ts": datetime.utcnow().isoformat(),
@@ -268,15 +287,22 @@ async def chat(request: ChatRequest):
         "demo": False,
     })
 
-    return StreamingResponse(
-        bot.ask(
+    async def bot_stream():
+        t_gen_start = time.perf_counter()
+        first = True
+        async for chunk in bot.ask(
             request.message,
             request.history,
             request.active_file,
             niche_hint=request.niche,
-        ),
-        media_type="text/plain",
-    )
+        ):
+            if first:
+                print(f"--- [WEB APP RAG] First Token: {time.perf_counter() - t_gen_start:.4f}s ---")
+                first = False
+            yield chunk
+        print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
+
+    return StreamingResponse(bot_stream(), media_type="text/plain")
 
 
 @router.get("/demo/{niche}")

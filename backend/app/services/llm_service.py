@@ -279,20 +279,30 @@ class LLMService:
     async def generate_chitchat_response(
         self,
         query: str,
-        history: List[Dict[str, str]]
+        history: List[Dict[str, str]],
+        prompt_for_document: bool = False
     ) -> AsyncIterable[str]:
         """
         Generates a friendly, human-like response for chitchat/greetings.
         Bypasses RAG restrictions and protocols.
         """
-        system_content = (
-            "You are Bodh AI, a helpful, conversational, and highly intelligent AI assistant. "
-            "The user is engaging in general conversation (greetings, small talk, or general questions). "
-            "Respond naturally, warmly, and like a human. "
-            "Keep the response relatively concise, engaging, and helpful. "
-            "If they ask what you can do, explain that they can upload PDF documents "
-            "(like legal, medical, HR, or financial papers) and you will analyze them with advanced domain protocols."
-        )
+        if prompt_for_document:
+            system_content = (
+                "You are Bodh AI, a highly professional, friendly, and helpful AI Document Assistant. "
+                "The user has NOT uploaded or selected any document yet. "
+                "You must respond to their query warmly, naturally, and professionally like a human, "
+                "and politely remind them that they can upload a PDF document (such as a legal, medical, "
+                "financial, or HR paper) so you can analyze it and answer questions about it. "
+                "Keep it highly engaging and conversational."
+            )
+        else:
+            system_content = (
+                "You are Bodh AI, a helpful, conversational, and highly intelligent AI assistant. "
+                "The user is engaging in general conversation (greetings, small talk, or simple acknowledgements). "
+                "Respond naturally, warmly, and like a friendly human. "
+                "CRITICAL: A document has ALREADY been uploaded and is active. DO NOT ask the user to upload a document. "
+                "Simply reply to their comment or greeting naturally, and if appropriate, let them know you are ready to answer any questions they have about their active document."
+            )
         
         messages = [SystemMessage(content=system_content)]
         for turn in history[-5:]: # Include last few turns for context

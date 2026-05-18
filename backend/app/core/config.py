@@ -13,9 +13,16 @@ class Config:
 
     BASE_DIR = BASE_DIR
     DATA_DIR = os.path.join(BASE_DIR, "data")
-    UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
-    VECTOR_STORE_DIR = os.path.join(DATA_DIR, "vector_store")
+
+    # ── Web App (isolated) ──────────────────────────────────────────────
+    UPLOAD_DIR        = os.path.join(DATA_DIR, "uploads")
+    VECTOR_STORE_DIR  = os.path.join(DATA_DIR, "vector_store")
     INDEXED_FILES_LOG = os.path.join(DATA_DIR, "indexed_files.txt")
+
+    # ── WhatsApp (completely isolated from web app) ─────────────────────
+    WA_UPLOAD_DIR        = os.path.join(DATA_DIR, "wa_uploads")
+    WA_VECTOR_STORE_DIR  = os.path.join(DATA_DIR, "wa_vector_store")
+    WA_INDEXED_FILES_LOG = os.path.join(DATA_DIR, "wa_indexed_files.txt")
 
     GENERATION_MODEL = "llama-3.3-70b-versatile"
     REASONING_MODEL  = "deepseek-r1-distill-llama-70b"
@@ -93,5 +100,7 @@ class Config:
             "similarity_threshold": domain_cfg["similarity_threshold"],
         }
 
-os.makedirs(Config.UPLOAD_DIR, exist_ok=True)
-os.makedirs(Config.VECTOR_STORE_DIR, exist_ok=True)
+os.makedirs(Config.UPLOAD_DIR,       exist_ok=True)
+os.makedirs(Config.VECTOR_STORE_DIR,  exist_ok=True)
+os.makedirs(Config.WA_UPLOAD_DIR,     exist_ok=True)
+os.makedirs(Config.WA_VECTOR_STORE_DIR, exist_ok=True)

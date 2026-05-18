@@ -8,45 +8,33 @@ from app.core.config import Config
 
 class VectorService:
     """
-    Singleton FAISS vector store with local HuggingFace embeddings.
+    FAISS vector store with local HuggingFace embeddings.
+
+    Each instance is fully independent — pass a different `store_dir` to
+    create an isolated index (e.g. web app vs WhatsApp).
 
     Why local embeddings?
     - Zero latency to an external API (no network round-trip for embed calls)
     - all-MiniLM-L6-v2 encodes a query in ~10-20ms on CPU
     - 384-dim vectors → compact FAISS index, fast ANN search
-
-    Optimizations:
-    - Metadata filtering by domain and source_file for precision
-    - Domain-aware similarity threshold per search
     """
-    _instance = None
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(VectorService, cls).__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
-    def __init__(self):
-        if self._initialized:
-            return
-        self._initialized = True
-
+    def __init__(self, store_dir: str = None):
+        self._store_dir = store_dir or Config.VECTOR_STORE_DIR
         self._embeddings = None
         self.vector_store = None
         self._index_attempted = False
         self._lock = threading.Lock()
-        
-        print("--- VectorService: Initialized (Lazy Loading Enabled) ---")
+
+        print(f"--- VectorService: Initialized → store: {self._store_dir} ---")
 
     @property
     def embeddings(self):
-        """Lazy-loaded HuggingFace embeddings."""
+        """Lazy-loaded HuggingFace embeddings (shared model, separate index)."""
         if self._embeddings is None:
             with self._lock:
                 if self._embeddings is None:
                     print("--- VectorService: Loading local embedding model (first-time warm-up) ---")
-                    # Move import here to avoid top-level overhead
                     from langchain_huggingface import HuggingFaceEmbeddings
                     self._embeddings = HuggingFaceEmbeddings(
                         model_name=Config.EMBEDDING_MODEL,
@@ -60,37 +48,36 @@ class VectorService:
         _ = self.embeddings
 
     def load_index(self) -> bool:
-        """Loads FAISS index from disk; auto-clears on model mismatch."""
-        if os.path.exists(Config.VECTOR_STORE_DIR) and os.listdir(Config.VECTOR_STORE_DIR):
+        """Loads FAISS index from this instance's store_dir."""
+        if os.path.exists(self._store_dir) and os.listdir(self._store_dir):
             try:
                 self.vector_store = FAISS.load_local(
-                    Config.VECTOR_STORE_DIR,
+                    self._store_dir,
                     self.embeddings,
                     allow_dangerous_deserialization=True,
                 )
-                print(f"--- Vector Store Loaded from {Config.VECTOR_STORE_DIR} ---")
+                print(f"--- Vector Store Loaded from {self._store_dir} ---")
                 return True
             except Exception as e:
                 print(f"--- Incompatible Index ({e}). Auto-clearing for fresh start. ---")
                 self.clear_all_data()
         return False
 
+
     def clear_all_data(self):
-        """Wipes vector store and index log for a clean rebuild."""
+        """Wipes this instance's vector store for a clean rebuild."""
         import shutil
-        if os.path.exists(Config.VECTOR_STORE_DIR):
-            shutil.rmtree(Config.VECTOR_STORE_DIR)
-            os.makedirs(Config.VECTOR_STORE_DIR, exist_ok=True)
-        if os.path.exists(Config.INDEXED_FILES_LOG):
-            os.remove(Config.INDEXED_FILES_LOG)
+        if os.path.exists(self._store_dir):
+            shutil.rmtree(self._store_dir)
+            os.makedirs(self._store_dir, exist_ok=True)
         self.vector_store = None
-        print("--- System Reset: Vector Store and Index Log Cleared ---")
+        print(f"--- System Reset: Vector Store cleared at {self._store_dir} ---")
 
     def save_index(self):
-        """Persists the FAISS index to disk."""
+        """Persists the FAISS index to this instance's store_dir."""
         if self.vector_store:
-            self.vector_store.save_local(Config.VECTOR_STORE_DIR)
-            print(f"--- Vector Store Saved to {Config.VECTOR_STORE_DIR} ---")
+            self.vector_store.save_local(self._store_dir)
+            print(f"--- Vector Store Saved to {self._store_dir} ---")
 
     def add_documents(self, documents: list):
         """Batch-adds documents to FAISS; creates store if it doesn't exist."""
@@ -139,10 +126,12 @@ class VectorService:
 
         try:
             if embedding is not None:
-                # Use _with_score (L2 distance) since _with_relevance_scores is not available for by_vector
-                results_with_scores = self.vector_store.similarity_search_by_vector_with_score(
+                # Correct method name in langchain-community FAISS wrapper
+                # (similarity_search_by_vector_with_score does NOT exist — this was a bug)
+                results_with_scores = self.vector_store.similarity_search_with_score_by_vector(
                     embedding, k=k, filter=filter_dict
                 )
+                # Scores from FAISS are L2 distances; convert to cosine similarity proxy
                 scored = [
                     (doc, max(0.0, 1.0 - (score / 2.0)))
                     for doc, score in results_with_scores
@@ -157,22 +146,33 @@ class VectorService:
                 if score >= similarity_threshold
             ]
 
-            # Active file boosting: if user selected a specific file, ensure at least 50% of results come from that file
-            if active_file and filtered:
-                active_docs = [d for d in filtered if d.metadata.get("source_file", "").lower() == active_file.lower()]
-                other_docs = [d for d in filtered if d.metadata.get("source_file", "").lower() != active_file.lower()]
-
+            # Active file filtering: if active_file is set, ONLY return chunks from that file.
+            # This is strict (not just boosting) — the user explicitly selected this file.
+            if active_file:
+                af_lower = active_file.lower()
+                active_docs = [d for d in filtered if d.metadata.get("source_file", "").lower() == af_lower]
                 if active_docs:
-                    target_active = max(len(filtered) // 2, min(len(active_docs), 3))
-                    boosted = active_docs[:target_active] + other_docs[:max(1, len(filtered) - target_active)]
-                    filtered = boosted[:k]
+                    filtered = active_docs[:k]
+                else:
+                    # No chunks from active file passed threshold — return empty so
+                    # the caller can do a zero-threshold retry scoped to this file.
+                    filtered = []
 
             print(f"--- VectorService: Retrieved {len(scored)} chunks, "
                   f"{len(filtered)} above threshold (threshold={similarity_threshold}) ---")
 
             if filtered:
                 return filtered
+
+            # Final fallback (threshold=0.0 path or no active_file): top-N by score
+            # Still respect active_file to avoid cross-contamination
+            if active_file:
+                af_lower = active_file.lower()
+                af_scored = [(doc, s) for doc, s in scored if doc.metadata.get("source_file", "").lower() == af_lower]
+                if af_scored:
+                    return [doc for doc, _ in af_scored[:k]]
             return [doc for doc, _ in scored[:3]]
+
 
         except Exception as e:
             print(f"--- VectorService search error: {e}. Falling back to basic search. ---")

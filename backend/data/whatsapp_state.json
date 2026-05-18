@@ -1,0 +1,23 @@
+{
+  "918100474669": {
+    "history": [
+      {
+        "role": "user",
+        "content": "Hi"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello. It's lovely to meet you. Is there something I can help you with or would you like to chat for a bit? If you have a document you'd like me to take a look at, I'd be more than happy to assist you. You can upload a PDF, such as a legal, medical, financial, or HR paper, and I can analyze it and answer any questions you might have about it. Just let me know how I can help."
+      },
+      {
+        "role": "user",
+        "content": "What this document is all"
+      },
+      {
+        "role": "assistant",
+        "content": "I couldn't find specific details regarding that in the uploaded document. Feel free to ask another question about the file, or upload a new PDF!"
+      }
+    ],
+    "last_file": "027-2025 Review Notice_250924_155430.pdf"
+  }
+}

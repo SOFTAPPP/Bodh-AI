@@ -10,10 +10,25 @@ import os
 
 class PDFChatBot:
 
-    def __init__(self):
-        self.vector_service = VectorService()
+    def __init__(self, platform: str = "web"):
+        """
+        platform: "web"       → uses Config.UPLOAD_DIR / VECTOR_STORE_DIR / INDEXED_FILES_LOG
+                  "whatsapp"  → uses Config.WA_UPLOAD_DIR / WA_VECTOR_STORE_DIR / WA_INDEXED_FILES_LOG
+        Each platform is fully isolated — documents indexed on one are invisible to the other.
+        """
+        if platform == "whatsapp":
+            vector_store_dir  = Config.WA_VECTOR_STORE_DIR
+            upload_dir        = Config.WA_UPLOAD_DIR
+            indexed_files_log = Config.WA_INDEXED_FILES_LOG
+        else:
+            vector_store_dir  = Config.VECTOR_STORE_DIR
+            upload_dir        = Config.UPLOAD_DIR
+            indexed_files_log = Config.INDEXED_FILES_LOG
+
+        self.platform       = platform
+        self.vector_service = VectorService(store_dir=vector_store_dir)
         self.llm_service    = LLMService()
-        self.doc_service    = DocumentService()
+        self.doc_service    = DocumentService(upload_dir=upload_dir, indexed_files_log=indexed_files_log)
 
         # Per-domain query cache: {domain: [{"embedding": [...], "answer": "..."}]}
         self._query_caches: Dict[str, List[Dict]] = {}
@@ -36,14 +51,24 @@ class PDFChatBot:
         import time
         t0 = time.perf_counter()
 
-        # Fast-path for simple chitchat/greetings
+        # Check if the user has uploaded/selected any document yet
+        if not active_file and not niche_hint:
+            print(f"--- [CONVERSATIONAL] No active file/niche — responding conversationally ---")
+            async for chunk in self.llm_service.generate_chitchat_response(query, history, prompt_for_document=True):
+                yield chunk
+            return
+
+        # Fast-path for simple chitchat/greetings/acknowledgements
         q = query.lower().strip().strip("?").strip("!").strip(".")
         chitchat_phrases = {
             "hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening",
             "how are you", "how's it going", "howdy", "who are you", "what is your name", "what can you do",
-            "thanks", "thank you", "bye", "goodbye", "help", "what's up", "sup"
+            "thanks", "thank you", "bye", "goodbye", "help", "what's up", "sup",
+            "ok", "okay", "sure", "cool", "great", "nice", "fine", "wow", "got it", "i see", "perfect", "awesome",
+            "yes", "no", "thank you", "thx", "congrats", "well", "alright"
         }
-        if q in chitchat_phrases or (len(q.split()) <= 2 and any(w in q for w in ["hi", "hello", "hey", "thanks", "thank", "bye"])):
+        words = q.split()
+        if q in chitchat_phrases or (len(words) <= 3 and any(w in chitchat_phrases for w in words)):
             print(f"--- [CHITCHAT] Direct chitchat bypass ---")
             async for chunk in self.llm_service.generate_chitchat_response(query, history):
                 yield chunk
@@ -108,42 +133,31 @@ class PDFChatBot:
             active_file=active_file,
         )
 
-        # Retry loop while background indexing is still running
-        retries = 0
-        while not docs and active_file and retries < 3:
-            print(f"--- [RETRY] Empty context. Waiting for background indexing... ({retries+1}/3) ---")
-            await asyncio.sleep(1.5)
-            docs = self.vector_service.search(
-                standalone_query,
-                k=top_k,
-                filter_dict=filter_dict,
-                embedding=search_embedding,
-                similarity_threshold=similarity_threshold,
-                active_file=active_file,
-            )
-            retries += 1
-
-        # Last-resort: trigger sync and retry
-        if not docs:
-            await self.sync_data_folder()
-            docs = self.vector_service.search(
-                standalone_query,
-                k=top_k,
-                filter_dict=filter_dict,
-                embedding=search_embedding,
-                similarity_threshold=similarity_threshold,
-                active_file=active_file,
-            )
-
         t_search = time.perf_counter()
         print(f"--- [PERF] Vector Search: {t_search - t_search_start:.4f}s | "
               f"{len(docs)} chunks [domain={domain}, top_k={top_k}, threshold={similarity_threshold}] ---")
 
+        # ── Fallback: if active_file is known but nothing passed the threshold ──
+        # Re-search with threshold=0.0 scoped only to that file, so "what is this about"
+        # always works even on short / single-chunk documents.
+        if not docs and active_file:
+            print(f"--- [FALLBACK] No docs above threshold. Retrying with threshold=0 for active_file={active_file} ---")
+            docs = self.vector_service.search(
+                standalone_query,
+                k=top_k,
+                filter_dict=None,          # drop domain filter — file filter is enough
+                embedding=search_embedding,
+                similarity_threshold=0.0,  # accept everything
+                active_file=active_file,
+            )
+            print(f"--- [FALLBACK] Retrieved {len(docs)} chunks from active file ---")
+
         if not docs:
-            msg = "I don't know based on the provided context."
+            msg = "I couldn't find specific details regarding that in the uploaded document. Feel free to ask another question about the file, or upload a new PDF!"
             self._cache_store(query_embedding, msg, domain)
             yield msg
             return
+
         meta_domain   = docs[0].metadata.get("domain", "general")
         final_domain  = domain or meta_domain
 
@@ -193,16 +207,17 @@ class PDFChatBot:
             return 0
 
     async def sync_data_folder(self) -> int:
-        """Parallel indexing of all un-indexed PDFs in the uploads folder."""
+        """Parallel indexing of all un-indexed PDFs in this platform's uploads folder."""
+        upload_dir = self.doc_service.upload_dir
         indexed_files = self.doc_service.get_indexed_files()
         pending = [
-            os.path.join(Config.UPLOAD_DIR, f)
-            for f in os.listdir(Config.UPLOAD_DIR)
+            os.path.join(upload_dir, f)
+            for f in os.listdir(upload_dir)
             if f.lower().endswith(".pdf") and f.lower() not in indexed_files
         ]
         if not pending:
             return 0
-        print(f"--- Parallel Indexing {len(pending)} pending file(s)... ---")
+        print(f"--- [{self.platform}] Parallel Indexing {len(pending)} pending file(s)... ---")
         results = await asyncio.gather(*[self.process_new_pdf(f) for f in pending])
         return sum(results)
 

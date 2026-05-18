@@ -4,7 +4,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.core.config import Config
 
 class DocumentService:
-    def __init__(self):
+    def __init__(self, upload_dir: str = None, indexed_files_log: str = None):
+        self.upload_dir       = upload_dir       or Config.UPLOAD_DIR
+        self.indexed_files_log = indexed_files_log or Config.INDEXED_FILES_LOG
+
         self.default_text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=Config.CHUNK_SIZE,
             chunk_overlap=Config.CHUNK_OVERLAP,
@@ -63,13 +66,13 @@ class DocumentService:
         return chunks
 
     def get_indexed_files(self):
-        """Returns the list of already indexed files."""
-        if not os.path.exists(Config.INDEXED_FILES_LOG):
+        """Returns the set of already indexed files for this platform."""
+        if not os.path.exists(self.indexed_files_log):
             return set()
-        with open(Config.INDEXED_FILES_LOG, "r", encoding="utf-8") as f:
+        with open(self.indexed_files_log, "r", encoding="utf-8") as f:
             return set(line.strip().lower() for line in f if line.strip())
 
     def mark_as_indexed(self, filename: str):
-        """Logs a filename as indexed."""
-        with open(Config.INDEXED_FILES_LOG, "a", encoding="utf-8") as f:
+        """Logs a filename as indexed for this platform."""
+        with open(self.indexed_files_log, "a", encoding="utf-8") as f:
             f.write(f"{filename.lower()}\n")
