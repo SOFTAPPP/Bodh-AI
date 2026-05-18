@@ -78,7 +78,7 @@ class LLMService:
 
         Skips the LLM entirely for single-turn queries — uses heuristics instead.
         """
-        # ── Fast-path: no history → classify via heuristics (0ms overhead) ──
+        # Fast-path: classify via heuristics if there is no conversation history
         if not history:
             return self._heuristic_classify(query)
 
@@ -96,7 +96,7 @@ class LLMService:
         human_msg = f"PREV: {last['content'][:100]}\nQ: {query}"
 
         try:
-            # Use smallest model for sub-100ms analysis
+            # Use fallback model for fast query analysis
             resp = await self.fallback_llm.ainvoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=human_msg)],
                 config={"max_tokens": 120},

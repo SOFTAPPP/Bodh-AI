@@ -343,7 +343,7 @@ async def chat(request: ChatRequest):
     prepend_msg = ""
     is_selection_retry = False
     
-    # ── 1. Check if the user is replying to a document selection prompt ─────
+    # Check if user is responding to a document selection prompt
     if is_fallback_selection and target_list:
         text_clean = request.message.strip()
         selected_file = None
@@ -392,9 +392,9 @@ async def chat(request: ChatRequest):
                     request.message = "what is this document all about ?"
 
 
-    # ── 2. Run Intelligent Multi-Document Routing (if not selection retry) ──
+    # Run intelligent routing if not a selection retry
     if not is_selection_retry and all_files:
-        # Determine intent / standalone query
+        # Get standalone query and intent
         if request.niche:
             standalone_query = request.message
         else:
@@ -433,7 +433,7 @@ async def chat(request: ChatRequest):
                     
 
 
-    # Pass active niche hint if present to skip heuristic classification
+    # Log query analytics
     _query_log.append({
         "ts": datetime.utcnow().isoformat(),
         "niche": request.niche or "auto",
@@ -441,7 +441,7 @@ async def chat(request: ChatRequest):
         "demo": False,
     })
     
-    # FIX: Clear old conversation chain if document changed
+    # Clear chat history if user switched documents to avoid context leakage
     effective_history = request.history
     if active_file and previous_active_file and active_file.lower() != previous_active_file.lower():
         print(f"--- [SESSION] Active document changed from {previous_active_file} to {active_file}. Clearing history context. ---")

@@ -188,7 +188,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     prepend_msg = ""
     is_selection_retry = False
     
-    # ── 1. Check if the user is replying to a document selection prompt ─────
+    # Check if user is responding to a document selection prompt
     if is_fallback_selection and target_list:
         text_clean = text.strip()
         selected_file = None
@@ -239,7 +239,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
                     
                 prepend_msg = f"✅ **{active_file}** selected. \n\n"
 
-    # ── 2. Run Intelligent Multi-Document Routing (if not selection retry) ──
+    # Run intelligent routing if not a selection retry
     if not is_selection_retry and all_files:
         intent = await wa_bot.llm_service.analyze_query(text, history)
         standalone_query = intent.get("standalone_query", text)

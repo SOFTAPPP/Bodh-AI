@@ -14,26 +14,20 @@ class Config:
     BASE_DIR = BASE_DIR
     DATA_DIR = os.path.join(BASE_DIR, "data")
 
-    # ── Shared Vector Database & Document Knowledge Base ────────────────
     UPLOAD_DIR        = os.path.join(DATA_DIR, "uploads")
     VECTOR_STORE_DIR  = os.path.join(DATA_DIR, "vector_store")
     INDEXED_FILES_LOG = os.path.join(DATA_DIR, "indexed_files.txt")
 
-    # Both WhatsApp and Web application point to the same shared database of documents
     WA_UPLOAD_DIR        = UPLOAD_DIR
     WA_VECTOR_STORE_DIR  = VECTOR_STORE_DIR
     WA_INDEXED_FILES_LOG = INDEXED_FILES_LOG
 
     GENERATION_MODEL = "llama-3.3-70b-versatile"
     REASONING_MODEL  = "deepseek-r1-distill-llama-70b"
-    # Note: gemma2-9b-it was decommissioned by Groq; using llama-3.1-8b-instant instead
     FALLBACK_MODEL   = "llama-3.1-8b-instant"
 
-    # all-MiniLM-L6-v2 → 384-dim, ~14ms/query on CPU, excellent semantic accuracy
     EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
 
-    # Generates a short hypothetical answer → embeds it → searches FAISS.
-    # Bridges the semantic gap between short queries and long document chunks.
     HYDE_ENABLED = True
     HYDE_MODEL = "llama-3.1-8b-instant"
 
@@ -82,8 +76,8 @@ class Config:
         },
     }
 
-    CHUNK_SIZE        = 1000   # sweet spot: 800-1200 tokens
-    CHUNK_OVERLAP     = 200    # sweet spot: 150-250 tokens
+    CHUNK_SIZE        = 1000   
+    CHUNK_OVERLAP     = 200   
     TOP_K             = 12
     SIMILARITY_THRESHOLD = 0.25
 

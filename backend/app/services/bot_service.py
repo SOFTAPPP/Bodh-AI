@@ -80,14 +80,14 @@ class PDFChatBot:
                 yield chunk
             return
 
-        # ── CASE 1: Check if platform has ANY indexed documents ──────────────────
+        # Check if platform has indexed files
         platform_files = self.get_indexed_files()
 
         if not platform_files:
             yield "No files are currently available in the database. Please upload a document first."
             return
 
-        # ── Standalone Query Analysis ───────────────────────────────────────────
+        # Run query analysis and embedding generation
         if niche_hint:
             standalone_query = query
             intent = {
@@ -110,10 +110,10 @@ class PDFChatBot:
         t_embed = time.perf_counter()
         print(f"--- [PERF] Classify + Embed: {t_embed - t0:.4f}s ---")
 
-        # ── Intelligent Multi-Document Routing Layer ────────────────────────────
+        # Run multi-document routing layer
         auto_switch_message = ""
         
-        # We only route if not in manual selection retry (e.g. user selected from a list)
+        # Skip routing if user manually selected a file
         if not is_selection_retry:
             route_res = await self.route_query(standalone_query, platform_files)
             best_doc = route_res["best_doc"]
@@ -137,11 +137,9 @@ class PDFChatBot:
                 yield "This question does not appear related to any uploaded document."
                 return
         else:
-            # Recompute routing just to get the similarities for fallback suggestions
             route_res = await self.route_query(standalone_query, platform_files)
 
-        # ── CASE 4: Active document is set — run retrieval pipeline ─────────────
-        # Normalize active_file against known platform files (case-insensitive)
+        # Retrieve relevant chunks and construct context
         if active_file:
             matched_file = None
             for f in platform_files:
@@ -158,7 +156,7 @@ class PDFChatBot:
             bot_instance=self
         )
 
-        # REQUIRED DEBUG LOGGING FOR CONTEXT VERIFICATION
+        # Context debug logging
         print({
             "active_document": session.active_document,
             "index_path": session.faiss_index_path,
