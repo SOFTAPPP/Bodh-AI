@@ -1,14 +1,24 @@
+import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
+from app.api.whatsapp_routes import router as wa_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Warm up model in background thread so server starts instantly
+    from app.api.routes import bot
+    asyncio.create_task(asyncio.to_thread(bot.vector_service.warmup))
+    yield
 
 app = FastAPI(
     title="Bodh AI — Groq Ultra-Low-Latency RAG Engine",
     description="Enterprise-grade PDF intelligence powered by Groq + LLaMA 3.3 70B + FAISS",
     version="3.0.0",
+    lifespan=lifespan,
 )
 
-# Security: CORS setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, replace with your frontend URL
@@ -17,8 +27,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Routes
 app.include_router(router)
+app.include_router(wa_router, prefix="/whatsapp", tags=["whatsapp"])
 
 @app.get("/")
 async def root():

@@ -40,8 +40,6 @@ class LLMService:
 
         print(f"--- LLMService: Groq engine ready [{Config.GENERATION_MODEL}] ---")
 
-    # ─── HyDE (Hypothetical Document Embeddings) ──────────────────────────────
-
     async def generate_hypothetical_answer(self, query: str, domain: str) -> Optional[str]:
         """
         Generates a short hypothetical answer for the query.
@@ -73,8 +71,6 @@ class LLMService:
             print(f"--- HyDE generation error: {e}. Skipping HyDE. ---")
             return None
 
-    # ─── Query Analysis ──────────────────────────────────────────────────────
-
     async def analyze_query(self, query: str, history: List[Dict[str, str]]) -> Dict:
         """
         Ultra-fast query analysis using Groq (gemma2-9b-it for minimal latency).
@@ -86,7 +82,6 @@ class LLMService:
         if not history:
             return self._heuristic_classify(query)
 
-        # ── Follow-up: use lightweight Groq call to rephrase + classify ──────
         system_prompt = (
             "You are a RAG query classifier. Output ONLY valid JSON, no markdown fences:\n"
             '{"standalone_query": "...", "domain": "legal|medical|hr|financial|academic|general", '
@@ -117,12 +112,10 @@ class LLMService:
     def _heuristic_classify(self, query: str) -> Dict:
         """Zero-latency heuristic classifier (no LLM call)."""
         q = query.lower()
-        # Intent detection
         complex_kw = {"why", "how", "compare", "contrast", "analyze", "evaluate",
                       "difference", "impact", "implication", "relationship", "contradict"}
         intent = "complex_analysis" if any(kw in q for kw in complex_kw) else "fact_extraction"
 
-        # Domain detection
         domain = "general"
         if any(kw in q for kw in ["court", "plaintiff", "defendant", "judgment", "legal", "law", "clause", "section", "advocate", "appeal", "verdict"]):
             domain = "legal"
@@ -136,8 +129,6 @@ class LLMService:
             domain = "academic"
 
         return {"standalone_query": query, "domain": domain, "intent": intent}
-
-    # ─── Enhanced Domain Protocols ───────────────────────────────────────────
 
     def _get_domain_protocol(self, domain: str, intent: str = "fact_extraction") -> str:
         """
@@ -213,8 +204,6 @@ class LLMService:
         }
         return protocols.get(domain, protocols["general"])
 
-    # ─── Response Generation ─────────────────────────────────────────────────
-
     async def generate_response(
         self,
         query: str,
@@ -275,7 +264,7 @@ class LLMService:
                 async for chunk in llm.astream(messages):
                     if chunk.content:
                         yield chunk.content
-                return  # success — exit generator
+                return
             except Exception as e:
                 err = str(e)
                 if "rate_limit" in err.lower() or "429" in err:
@@ -285,5 +274,50 @@ class LLMService:
                 yield "An error occurred while generating the response."
                 return
 
-        # All models exhausted
         yield "All inference models are currently rate-limited. Please retry in a moment."
+
+    async def generate_chitchat_response(
+        self,
+        query: str,
+        history: List[Dict[str, str]]
+    ) -> AsyncIterable[str]:
+        """
+        Generates a friendly, human-like response for chitchat/greetings.
+        Bypasses RAG restrictions and protocols.
+        """
+        system_content = (
+            "You are Bodh AI, a helpful, conversational, and highly intelligent AI assistant. "
+            "The user is engaging in general conversation (greetings, small talk, or general questions). "
+            "Respond naturally, warmly, and like a human. "
+            "Keep the response relatively concise, engaging, and helpful. "
+            "If they ask what you can do, explain that they can upload PDF documents "
+            "(like legal, medical, HR, or financial papers) and you will analyze them with advanced domain protocols."
+        )
+        
+        messages = [SystemMessage(content=system_content)]
+        for turn in history[-5:]: # Include last few turns for context
+            # Handle if history contains dict objects or standard message dicts
+            role = turn.get("role", "user")
+            content = turn.get("content", turn.get("message", ""))
+            if not content:
+                continue
+            if role == "user":
+                messages.append(HumanMessage(content=content))
+            elif role == "assistant":
+                messages.append(SystemMessage(content=content))
+                
+        messages.append(HumanMessage(content=query))
+        
+        for llm, label in [
+            (self.generation_llm, Config.GENERATION_MODEL),
+            (self.fallback_llm,   Config.FALLBACK_MODEL),
+        ]:
+            try:
+                async for chunk in llm.astream(messages):
+                    if chunk.content:
+                        yield chunk.content
+                return
+            except Exception as e:
+                print(f"--- [CHITCHAT ERROR] {label}: {e} ---")
+                continue
+        yield "Hello! I'm here. How can I help you today?"

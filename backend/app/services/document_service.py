@@ -5,7 +5,6 @@ from app.core.config import Config
 
 class DocumentService:
     def __init__(self):
-        # Default text splitter (will be overridden per-domain at process time)
         self.default_text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=Config.CHUNK_SIZE,
             chunk_overlap=Config.CHUNK_OVERLAP,
@@ -47,7 +46,6 @@ class DocumentService:
         sample_text = "".join([d.page_content for d in documents[:2]])
         detected_domain = self.get_domain_from_content(sample_text)
 
-        # Use domain-specific text splitter for optimal chunking
         text_splitter = self._get_text_splitter_for_domain(detected_domain)
         chunks = text_splitter.split_documents(documents)
 

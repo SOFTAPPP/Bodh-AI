@@ -1,43 +1,35 @@
 import os
 from dotenv import load_dotenv
 
-# Get the backend directory (where .env lives)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 class Config:
-    # API Keys
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-    # Paths
+    META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "bodhai_verify_token")
+    META_API_TOKEN = os.getenv("META_API_TOKEN", "")
+    WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "")
+
     BASE_DIR = BASE_DIR
     DATA_DIR = os.path.join(BASE_DIR, "data")
     UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
     VECTOR_STORE_DIR = os.path.join(DATA_DIR, "vector_store")
     INDEXED_FILES_LOG = os.path.join(DATA_DIR, "indexed_files.txt")
 
-    # ── Groq Model Strategy ─────────────────────────────────────────────────
-    # Primary: best versatile throughput at ultra-low latency
     GENERATION_MODEL = "llama-3.3-70b-versatile"
-    # Reasoning / complex analysis: deep-think distilled model
     REASONING_MODEL  = "deepseek-r1-distill-llama-70b"
-    # Fallback: lightest, fastest model when primary is rate-limited
-    # Fallback: lightest, fastest model when primary is rate-limited
     # Note: gemma2-9b-it was decommissioned by Groq; using llama-3.1-8b-instant instead
     FALLBACK_MODEL   = "llama-3.1-8b-instant"
 
-    # ── Embedding Model (local, zero API cost) ──────────────────────────────
     # all-MiniLM-L6-v2 → 384-dim, ~14ms/query on CPU, excellent semantic accuracy
     EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
 
-    # ── HyDE (Hypothetical Document Embeddings) ─────────────────────────────
     # Generates a short hypothetical answer → embeds it → searches FAISS.
     # Bridges the semantic gap between short queries and long document chunks.
     HYDE_ENABLED = True
-    HYDE_MODEL = "llama-3.1-8b-instant"  # lightweight model for HyDE generation
+    HYDE_MODEL = "llama-3.1-8b-instant"
 
-    # ── Domain-Specific RAG Settings ────────────────────────────────────────
-    # Each domain has optimized chunking + retrieval parameters for precision.
     DOMAIN_CONFIG = {
         "legal": {
             "chunk_size": 1500,
@@ -83,14 +75,12 @@ class Config:
         },
     }
 
-    # ── Default RAG Settings (fallback) ─────────────────────────────────────
-    CHUNK_SIZE        = 1000   # tokens (sweet spot: 800-1200)
-    CHUNK_OVERLAP     = 200    # tokens (sweet spot: 150-250)
-    TOP_K             = 12     # chunks retrieved per query
-    SIMILARITY_THRESHOLD = 0.25  # min cosine score to include a chunk
+    CHUNK_SIZE        = 1000   # sweet spot: 800-1200 tokens
+    CHUNK_OVERLAP     = 200    # sweet spot: 150-250 tokens
+    TOP_K             = 12
+    SIMILARITY_THRESHOLD = 0.25
 
-    # ── Query Cache ─────────────────────────────────────────────────────────
-    CACHE_SIMILARITY_THRESHOLD = 0.98  # cosine sim for cache hit
+    CACHE_SIMILARITY_THRESHOLD = 0.98
 
     @classmethod
     def get_domain_config(cls, domain: str) -> dict:
@@ -103,6 +93,5 @@ class Config:
             "similarity_threshold": domain_cfg["similarity_threshold"],
         }
 
-# Ensure directories exist
 os.makedirs(Config.UPLOAD_DIR, exist_ok=True)
 os.makedirs(Config.VECTOR_STORE_DIR, exist_ok=True)

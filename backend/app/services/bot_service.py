@@ -20,8 +20,6 @@ class PDFChatBot:
         self._cache_threshold = Config.CACHE_SIMILARITY_THRESHOLD
         self._cache_max = 256  # evict oldest when exceeded per domain
 
-    # ─── Public API ──────────────────────────────────────────────────────────
-
     async def ask(
         self,
         query: str,
@@ -38,7 +36,19 @@ class PDFChatBot:
         import time
         t0 = time.perf_counter()
 
-        # ── Step 1: Classify + Embed ─────────────────────────────────────────
+        # Fast-path for simple chitchat/greetings
+        q = query.lower().strip().strip("?").strip("!").strip(".")
+        chitchat_phrases = {
+            "hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening",
+            "how are you", "how's it going", "howdy", "who are you", "what is your name", "what can you do",
+            "thanks", "thank you", "bye", "goodbye", "help", "what's up", "sup"
+        }
+        if q in chitchat_phrases or (len(q.split()) <= 2 and any(w in q for w in ["hi", "hello", "hey", "thanks", "thank", "bye"])):
+            print(f"--- [CHITCHAT] Direct chitchat bypass ---")
+            async for chunk in self.llm_service.generate_chitchat_response(query, history):
+                yield chunk
+            return
+
         if niche_hint:
             # Frontend already knows the niche — skip LLM classification
             standalone_query = query
@@ -67,14 +77,12 @@ class PDFChatBot:
         domain = intent.get("domain", "general")
         response_intent = intent.get("intent", "fact_extraction")
 
-        # ── Step 2: Per-domain Cache lookup ──────────────────────────────────
         cached_answer = self._cache_lookup(query_embedding, domain)
         if cached_answer is not None:
             print(f"--- [PERF] Cache HIT ({domain}) — serving instantly ---")
             yield cached_answer
             return
 
-        # ── Step 3: HyDE — Generate hypothetical answer for better retrieval ─
         hyde_embedding = None
         if Config.HYDE_ENABLED:
             hyde_text = await self.llm_service.generate_hypothetical_answer(standalone_query, domain)
@@ -82,20 +90,14 @@ class PDFChatBot:
                 hyde_embedding = await self.vector_service.aembed_query(hyde_text)
                 print(f"--- [PERF] HyDE generated & embedded ({len(hyde_text)} chars) ---")
 
-        # Use HyDE embedding if available, otherwise use query embedding
         search_embedding = hyde_embedding if hyde_embedding is not None else query_embedding
-
-        # ── Step 4: Domain-specific config for search ────────────────────────
         domain_cfg = Config.get_domain_config(domain)
         top_k = domain_cfg["top_k"]
         similarity_threshold = domain_cfg["similarity_threshold"]
 
-        # Build metadata filter for domain (if not general)
         filter_dict = None
         if domain != "general":
             filter_dict = {"domain": domain}
-
-        # ── Step 5: FAISS vector search with metadata filtering ──────────────
         t_search_start = time.perf_counter()
         docs = self.vector_service.search(
             standalone_query,
@@ -137,14 +139,11 @@ class PDFChatBot:
         print(f"--- [PERF] Vector Search: {t_search - t_search_start:.4f}s | "
               f"{len(docs)} chunks [domain={domain}, top_k={top_k}, threshold={similarity_threshold}] ---")
 
-        # ── Step 6: Guard — no context ───────────────────────────────────────
         if not docs:
             msg = "I don't know based on the provided context."
             self._cache_store(query_embedding, msg, domain)
             yield msg
             return
-
-        # ── Step 7: Build context string ─────────────────────────────────────
         meta_domain   = docs[0].metadata.get("domain", "general")
         final_domain  = domain or meta_domain
 
@@ -159,7 +158,6 @@ class PDFChatBot:
             for d in sorted_docs
         )
 
-        # ── Step 8: Stream Groq response ─────────────────────────────────────
         t_gen = time.perf_counter()
         first_token = False
         full_response = ""
@@ -177,11 +175,8 @@ class PDFChatBot:
         total = time.perf_counter() - t0
         print(f"--- [PERF] Total Query Latency: {total:.4f}s ---")
 
-        # Cache the answer per-domain
         if full_response:
             self._cache_store(query_embedding, full_response, domain)
-
-    # ─── PDF Ingestion ───────────────────────────────────────────────────────
 
     async def process_new_pdf(self, file_path: str) -> int:
         """Indexes a single PDF into FAISS (runs in background task)."""
@@ -189,7 +184,6 @@ class PDFChatBot:
             # Run CPU-bound PDF parsing in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
             chunks = await loop.run_in_executor(None, self.doc_service.process_pdf, file_path)
-            # Add documents (embedding is batched inside HuggingFace)
             await loop.run_in_executor(None, self.vector_service.add_documents, chunks)
             self.doc_service.mark_as_indexed(os.path.basename(file_path))
             print(f"--- Indexed {len(chunks)} chunks from {os.path.basename(file_path)} ---")
@@ -211,8 +205,6 @@ class PDFChatBot:
         print(f"--- Parallel Indexing {len(pending)} pending file(s)... ---")
         results = await asyncio.gather(*[self.process_new_pdf(f) for f in pending])
         return sum(results)
-
-    # ─── Per-Domain Cache Helpers ────────────────────────────────────────────
 
     def _get_domain_cache(self, domain: str) -> List[Dict]:
         """Returns the cache list for a given domain, creating if needed."""

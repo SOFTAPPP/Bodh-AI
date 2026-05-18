@@ -9,7 +9,6 @@ interface Message {
   sources?: { page: number; source: string }[];
 }
 
-// Demo question chips per niche
 const NICHE_DEMOS: Record<string, { label: string; icon: string; questions: string[] }> = {
   legal: {
     label: 'Law Firm',
@@ -66,7 +65,6 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Theme Toggle Effect
   useEffect(() => {
     if (darkMode) {
       document.body.classList.add('dark');
@@ -81,10 +79,7 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         setIndexedFiles(data.files);
-        // If no current file is selected but files exist, select the first one
-        if (!currentFile && data.files.length > 0) {
-          // setCurrentFile(data.files[0]);
-        }
+        // No current file pre-selection
       }
     } catch (error) {
       console.error('Failed to fetch files:', error);
@@ -169,18 +164,15 @@ function App() {
           content: msg
         }]);
 
-        // If already indexed, refresh immediately
         if (isAlreadyIndexed) {
           await fetchFiles();
         } else {
           // Poll for the file to appear in indexed list (background indexing)
-          // Check every 2 seconds, up to 30 seconds max
           let attempts = 0;
           const maxAttempts = 15;
           const pollInterval = setInterval(async () => {
             attempts++;
             await fetchFiles();
-            // Check if our file is now in the indexed list
             const checkResp = await fetch('http://localhost:8000/files');
             if (checkResp.ok) {
               const checkData = await checkResp.json();
@@ -312,7 +304,6 @@ function App() {
     const pushTable = (index: number) => {
       if (currentTable.length > 0) {
         const tableKey = `table-${index}`;
-        // Detect if it's a header or just rows
         const hasHeader = currentTable.length > 0;
 
         renderedElements.push(
@@ -434,7 +425,6 @@ function App() {
             Upload any business document — contracts, policies, medical records, financial reports — and get instant, forensic-level answers. Built for Law Firms, Clinics, and Real Estate agencies.
           </p>
 
-          {/* Niche tabs */}
           <div className="niche-tabs animate-slideUp">
             {Object.entries(NICHE_DEMOS).map(([key, n]) => (
               <button
@@ -447,7 +437,6 @@ function App() {
             ))}
           </div>
 
-          {/* Demo questions preview */}
           <div className="hero-chips animate-slideUp">
             {NICHE_DEMOS[activeNiche].questions.map((q, i) => (
               <div key={i} className="hero-chip" onClick={() => { setView('chat'); setTimeout(() => setInput(q), 200); }}>
@@ -527,7 +516,6 @@ function App() {
 
   return (
     <div className="app-root">
-      {/* Lead Capture Modal */}
       {showLeadModal && !leadSent && (
         <div className="lead-modal-overlay" onClick={() => setShowLeadModal(false)}>
           <div className="lead-modal" onClick={e => e.stopPropagation()}>
@@ -686,7 +674,6 @@ function App() {
             </div>
 
             <div className="input-container">
-              {/* Inline demo chips above input when no messages */}
               {messages.length === 0 && (
                 <div className="inline-chips">
                   {NICHE_DEMOS[activeNiche].questions.map((q, i) => (

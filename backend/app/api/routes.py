@@ -12,11 +12,10 @@ from app.core.config import Config
 router = APIRouter()
 bot = PDFChatBot()
 
-# ── In-memory analytics store (replace with DB for production) ────────────────
+# In-memory analytics store (replace with DB for production)
 _query_log: List[dict] = []
 _leads_store: List[dict] = []
 
-# ── Sample demo contexts per niche (no PDF upload required) ───────────────────
 DEMO_CONTEXTS = {
     "legal": {
         "niche": "legal",
@@ -187,14 +186,12 @@ Overall risk rating: MEDIUM. Immediate clarification required on marketing spend
 }
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
-
 class ChatRequest(BaseModel):
     message: str
     history: List[dict] = []
     active_file: Optional[str] = None
-    niche: Optional[str] = None       # NEW: pre-seed domain from frontend
-    demo_mode: Optional[bool] = False  # NEW: use hardcoded demo context
+    niche: Optional[str] = None
+    demo_mode: Optional[bool] = False
 
 
 class LeadRequest(BaseModel):
@@ -202,9 +199,6 @@ class LeadRequest(BaseModel):
     email: str
     business_type: str
     message: Optional[str] = None
-
-
-# ── Upload ────────────────────────────────────────────────────────────────────
 
 @router.post("/upload")
 async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
@@ -225,19 +219,27 @@ async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(
             "message": "File upload complete. Indexing in background..."}
 
 
-# ── Files ─────────────────────────────────────────────────────────────────────
-
 @router.get("/files")
 async def get_files():
     files = list(bot.doc_service.get_indexed_files())
     return {"files": files}
 
 
-# ── Chat (with niche + demo_mode support) ─────────────────────────────────────
-
 @router.post("/chat")
 async def chat(request: ChatRequest):
-    # Demo mode: inject hardcoded context instead of FAISS search
+    # Fast-path for simple chitchat/greetings
+    q = request.message.lower().strip().strip("?").strip("!").strip(".")
+    chitchat_phrases = {
+        "hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening",
+        "how are you", "how's it going", "howdy", "who are you", "what is your name", "what can you do",
+        "thanks", "thank you", "bye", "goodbye", "help", "what's up", "sup"
+    }
+    if q in chitchat_phrases or (len(q.split()) <= 2 and any(w in q for w in ["hi", "hello", "hey", "thanks", "thank", "bye"])):
+        async def chitchat_stream():
+            async for chunk in bot.llm_service.generate_chitchat_response(request.message, request.history):
+                yield chunk
+        return StreamingResponse(chitchat_stream(), media_type="text/plain")
+
     if request.demo_mode and request.niche and request.niche in DEMO_CONTEXTS:
         demo = DEMO_CONTEXTS[request.niche]
         async def demo_stream():
@@ -249,7 +251,6 @@ async def chat(request: ChatRequest):
             ):
                 yield chunk
 
-        # Log analytics
         _query_log.append({
             "ts": datetime.utcnow().isoformat(),
             "niche": request.niche,
@@ -259,7 +260,7 @@ async def chat(request: ChatRequest):
 
         return StreamingResponse(demo_stream(), media_type="text/plain")
 
-    # Normal RAG mode — pass niche hint to skip heuristic classification
+    # Pass active niche hint if present to skip heuristic classification
     _query_log.append({
         "ts": datetime.utcnow().isoformat(),
         "niche": request.niche or "auto",
@@ -278,8 +279,6 @@ async def chat(request: ChatRequest):
     )
 
 
-# ── Demo Context ──────────────────────────────────────────────────────────────
-
 @router.get("/demo/{niche}")
 async def get_demo_context(niche: str):
     """Returns sample questions and metadata for a given niche demo."""
@@ -292,8 +291,6 @@ async def get_demo_context(niche: str):
         "sample_questions": demo["sample_questions"],
     }
 
-
-# ── Lead Capture ──────────────────────────────────────────────────────────────
 
 @router.post("/leads")
 async def capture_lead(lead: LeadRequest):
@@ -334,8 +331,6 @@ async def get_leads():
     return {"leads": _leads_store, "total": len(_leads_store)}
 
 
-# ── Analytics ─────────────────────────────────────────────────────────────────
-
 @router.get("/analytics")
 async def get_analytics():
     """Returns query stats — most popular niches, total queries, demo vs real."""
@@ -356,8 +351,6 @@ async def get_analytics():
         "recent": _query_log[-10:][::-1],
     }
 
-
-# ── Sync ──────────────────────────────────────────────────────────────────────
 
 @router.post("/sync")
 async def sync():
