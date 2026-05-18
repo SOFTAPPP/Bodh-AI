@@ -19,29 +19,31 @@ class VectorService:
     - 384-dim vectors → compact FAISS index, fast ANN search
     """
 
+    # Class-level cache for the shared embedding model to save memory and warm up instantly
+    _shared_embeddings = None
+    _shared_lock = threading.Lock()
+
     def __init__(self, store_dir: str = None):
         self._store_dir = store_dir or Config.VECTOR_STORE_DIR
-        self._embeddings = None
         self.vector_store = None
         self._index_attempted = False
-        self._lock = threading.Lock()
 
         print(f"--- VectorService: Initialized → store: {self._store_dir} ---")
 
     @property
     def embeddings(self):
         """Lazy-loaded HuggingFace embeddings (shared model, separate index)."""
-        if self._embeddings is None:
-            with self._lock:
-                if self._embeddings is None:
+        if VectorService._shared_embeddings is None:
+            with VectorService._shared_lock:
+                if VectorService._shared_embeddings is None:
                     print("--- VectorService: Loading local embedding model (first-time warm-up) ---")
                     from langchain_huggingface import HuggingFaceEmbeddings
-                    self._embeddings = HuggingFaceEmbeddings(
+                    VectorService._shared_embeddings = HuggingFaceEmbeddings(
                         model_name=Config.EMBEDDING_MODEL,
                         model_kwargs={"device": "cpu"},
                         encode_kwargs={"normalize_embeddings": True},
                     )
-        return self._embeddings
+        return VectorService._shared_embeddings
 
     def warmup(self):
         """Triggers model loading to avoid first-query delay."""

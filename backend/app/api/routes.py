@@ -244,7 +244,8 @@ async def chat(request: ChatRequest):
             print(f"--- [WEB APP CHITCHAT] Bypassing FAISS. Starting generation stream... ---")
             t_gen_start = time.perf_counter()
             first = True
-            async for chunk in bot.llm_service.generate_chitchat_response(request.message, request.history):
+            prompt_doc = (request.active_file is None)
+            async for chunk in bot.llm_service.generate_chitchat_response(request.message, request.history, prompt_for_document=prompt_doc):
                 if first:
                     print(f"--- [WEB APP CHITCHAT] First Token: {time.perf_counter() - t_gen_start:.4f}s ---")
                     first = False
@@ -252,32 +253,30 @@ async def chat(request: ChatRequest):
             print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
         return StreamingResponse(chitchat_stream(), media_type="text/plain")
 
-    if request.demo_mode and request.niche and request.niche in DEMO_CONTEXTS:
-        demo = DEMO_CONTEXTS[request.niche]
-        async def demo_stream():
-            print(f"--- [WEB APP DEMO] Starting domain prompt generator... ---")
-            t_gen_start = time.perf_counter()
-            first = True
-            async for chunk in bot.llm_service.generate_response(
-                request.message,
-                demo["context"],
-                domain=demo["niche"],
-                intent="fact_extraction",
-            ):
-                if first:
-                    print(f"--- [WEB APP DEMO] First Token: {time.perf_counter() - t_gen_start:.4f}s ---")
-                    first = False
-                yield chunk
-            print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
+    # Resolve active file if not set
+    active_file = request.active_file
+    web_files = sorted(list(bot.doc_service_web.get_indexed_files()))
+    wa_files = sorted(list(bot.doc_service_wa.get_indexed_files()))
+    all_files = web_files + wa_files
+    prepend_msg = ""
+    
+    if not active_file and all_files:
+        text_clean = request.message.strip()
+        selected_file = None
+        if text_clean.isdigit():
+            idx = int(text_clean) - 1
+            if 0 <= idx < len(all_files):
+                selected_file = all_files[idx]
+        else:
+            # Check for exact or partial filename match (case-insensitive)
+            matches = [f for f in all_files if text_clean.lower() in f]
+            if len(matches) == 1:
+                selected_file = matches[0]
+                
+        if selected_file:
+            active_file = selected_file
+            request.message = "what is this document all about ?"
 
-        _query_log.append({
-            "ts": datetime.utcnow().isoformat(),
-            "niche": request.niche,
-            "query": request.message,
-            "demo": True,
-        })
-
-        return StreamingResponse(demo_stream(), media_type="text/plain")
 
     # Pass active niche hint if present to skip heuristic classification
     _query_log.append({
@@ -289,11 +288,13 @@ async def chat(request: ChatRequest):
 
     async def bot_stream():
         t_gen_start = time.perf_counter()
+        if prepend_msg:
+            yield prepend_msg
         first = True
         async for chunk in bot.ask(
             request.message,
             request.history,
-            request.active_file,
+            active_file,
             niche_hint=request.niche,
         ):
             if first:

@@ -16,19 +16,23 @@ class PDFChatBot:
                   "whatsapp"  → uses Config.WA_UPLOAD_DIR / WA_VECTOR_STORE_DIR / WA_INDEXED_FILES_LOG
         Each platform is fully isolated — documents indexed on one are invisible to the other.
         """
-        if platform == "whatsapp":
-            vector_store_dir  = Config.WA_VECTOR_STORE_DIR
-            upload_dir        = Config.WA_UPLOAD_DIR
-            indexed_files_log = Config.WA_INDEXED_FILES_LOG
-        else:
-            vector_store_dir  = Config.VECTOR_STORE_DIR
-            upload_dir        = Config.UPLOAD_DIR
-            indexed_files_log = Config.INDEXED_FILES_LOG
+        self.platform = platform
+        self.llm_service = LLMService()
 
-        self.platform       = platform
-        self.vector_service = VectorService(store_dir=vector_store_dir)
-        self.llm_service    = LLMService()
-        self.doc_service    = DocumentService(upload_dir=upload_dir, indexed_files_log=indexed_files_log)
+        # Initialize both environments so we can cross-query
+        self.doc_service_web = DocumentService(upload_dir=Config.UPLOAD_DIR, indexed_files_log=Config.INDEXED_FILES_LOG)
+        self.doc_service_wa = DocumentService(upload_dir=Config.WA_UPLOAD_DIR, indexed_files_log=Config.WA_INDEXED_FILES_LOG)
+        
+        self.vector_service_web = VectorService(store_dir=Config.VECTOR_STORE_DIR)
+        self.vector_service_wa = VectorService(store_dir=Config.WA_VECTOR_STORE_DIR)
+
+        # Retain backwards compatibility for default platform
+        if platform == "whatsapp":
+            self.doc_service = self.doc_service_wa
+            self.vector_service = self.vector_service_wa
+        else:
+            self.doc_service = self.doc_service_web
+            self.vector_service = self.vector_service_web
 
         # Per-domain query cache: {domain: [{"embedding": [...], "answer": "..."}]}
         self._query_caches: Dict[str, List[Dict]] = {}
@@ -51,13 +55,6 @@ class PDFChatBot:
         import time
         t0 = time.perf_counter()
 
-        # Check if the user has uploaded/selected any document yet
-        if not active_file and not niche_hint:
-            print(f"--- [CONVERSATIONAL] No active file/niche — responding conversationally ---")
-            async for chunk in self.llm_service.generate_chitchat_response(query, history, prompt_for_document=True):
-                yield chunk
-            return
-
         # Fast-path for simple chitchat/greetings/acknowledgements
         q = query.lower().strip().strip("?").strip("!").strip(".")
         chitchat_phrases = {
@@ -70,9 +67,48 @@ class PDFChatBot:
         words = q.split()
         if q in chitchat_phrases or (len(words) <= 3 and any(w in chitchat_phrases for w in words)):
             print(f"--- [CHITCHAT] Direct chitchat bypass ---")
-            async for chunk in self.llm_service.generate_chitchat_response(query, history):
+            prompt_doc = (active_file is None)
+            async for chunk in self.llm_service.generate_chitchat_response(query, history, prompt_for_document=prompt_doc):
                 yield chunk
             return
+
+        # Check if the user has uploaded/selected any document yet
+        if not active_file:
+            web_files = sorted(list(self.doc_service_web.get_indexed_files()))
+            wa_files = sorted(list(self.doc_service_wa.get_indexed_files()))
+            
+            if not web_files and not wa_files:
+                yield "No documents have been uploaded yet. Please upload a PDF document first so I can analyze it and answer your questions."
+                return
+            
+            # Since there are files, ask them which one they want to query in a warm, human-like way
+            msg = "Which document are you talking about? Here are the available documents in the database:\n\n"
+            
+            # De-duplicate while preserving order
+            seen = set()
+            unique_files = []
+            for f in (web_files + wa_files):
+                if f not in seen:
+                    seen.add(f)
+                    unique_files.append(f)
+                    
+            for idx, f in enumerate(unique_files, 1):
+                msg += f"{idx}. **{f}**\n"
+                
+            msg += "\nPlease select a document by typing its number or name to continue."
+            yield msg
+            return
+
+        # Resolve which vector service to use based on where active_file belongs
+        vector_service = self.vector_service
+        if active_file:
+            af_lower = active_file.lower()
+            if af_lower in self.doc_service_web.get_indexed_files():
+                vector_service = self.vector_service_web
+                print(f"--- [DYNAMIC VECTOR ROUTE] Routed active_file '{active_file}' to Web Store ---")
+            elif af_lower in self.doc_service_wa.get_indexed_files():
+                vector_service = self.vector_service_wa
+                print(f"--- [DYNAMIC VECTOR ROUTE] Routed active_file '{active_file}' to WhatsApp Store ---")
 
         if niche_hint:
             # Frontend already knows the niche — skip LLM classification
@@ -82,19 +118,19 @@ class PDFChatBot:
                 "domain": niche_hint,
                 "intent": "fact_extraction",
             }
-            query_embedding = await self.vector_service.aembed_query(query)
+            query_embedding = await vector_service.aembed_query(query)
             print(f"--- [NICHE HINT] Domain pre-seeded as '{niche_hint}' — skipping classify ---")
         elif not history:
             # First turn: heuristic classify (0ms) + embed in parallel
             intent_task   = asyncio.create_task(self.llm_service.analyze_query(query, history))
-            embed_task    = asyncio.create_task(self.vector_service.aembed_query(query))
+            embed_task    = asyncio.create_task(vector_service.aembed_query(query))
             intent, query_embedding = await asyncio.gather(intent_task, embed_task)
             standalone_query = query
         else:
             # Follow-up: need rephrased query before embedding
             intent           = await self.llm_service.analyze_query(query, history)
             standalone_query = intent.get("standalone_query", query)
-            query_embedding  = await self.vector_service.aembed_query(standalone_query)
+            query_embedding  = await vector_service.aembed_query(standalone_query)
 
         t_embed = time.perf_counter()
         print(f"--- [PERF] Classify + Embed: {t_embed - t0:.4f}s ---")
@@ -112,19 +148,19 @@ class PDFChatBot:
         if Config.HYDE_ENABLED:
             hyde_text = await self.llm_service.generate_hypothetical_answer(standalone_query, domain)
             if hyde_text:
-                hyde_embedding = await self.vector_service.aembed_query(hyde_text)
+                hyde_embedding = await vector_service.aembed_query(hyde_text)
                 print(f"--- [PERF] HyDE generated & embedded ({len(hyde_text)} chars) ---")
-
+ 
         search_embedding = hyde_embedding if hyde_embedding is not None else query_embedding
         domain_cfg = Config.get_domain_config(domain)
         top_k = domain_cfg["top_k"]
         similarity_threshold = domain_cfg["similarity_threshold"]
-
+ 
         filter_dict = None
         if domain != "general":
             filter_dict = {"domain": domain}
         t_search_start = time.perf_counter()
-        docs = self.vector_service.search(
+        docs = vector_service.search(
             standalone_query,
             k=top_k,
             filter_dict=filter_dict,
@@ -132,17 +168,17 @@ class PDFChatBot:
             similarity_threshold=similarity_threshold,
             active_file=active_file,
         )
-
+ 
         t_search = time.perf_counter()
         print(f"--- [PERF] Vector Search: {t_search - t_search_start:.4f}s | "
               f"{len(docs)} chunks [domain={domain}, top_k={top_k}, threshold={similarity_threshold}] ---")
-
+ 
         # ── Fallback: if active_file is known but nothing passed the threshold ──
         # Re-search with threshold=0.0 scoped only to that file, so "what is this about"
         # always works even on short / single-chunk documents.
         if not docs and active_file:
             print(f"--- [FALLBACK] No docs above threshold. Retrying with threshold=0 for active_file={active_file} ---")
-            docs = self.vector_service.search(
+            docs = vector_service.search(
                 standalone_query,
                 k=top_k,
                 filter_dict=None,          # drop domain filter — file filter is enough

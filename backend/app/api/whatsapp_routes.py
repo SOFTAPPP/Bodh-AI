@@ -51,64 +51,77 @@ async def webhook_events(request: Request, background_tasks: BackgroundTasks):
 
     # Always return 200 OK to Meta
     return {"status": "ok"}
- 
-async def process_whatsapp_message(phone_number: str, message: dict, t_web_received: float):
-    import time
-    t_bg_start = time.perf_counter()
-    print(f"--- [WHATSAPP BG DISPATCH] Time since Webhook received: {t_bg_start - t_web_received:.4f}s ---")
+user_locks = {}
 
-    msg_type = message.get("type")
+def get_user_lock(phone_number: str) -> asyncio.Lock:
+    if phone_number not in user_locks:
+        user_locks[phone_number] = asyncio.Lock()
+    return user_locks[phone_number]
+
+async def process_whatsapp_message(phone_number: str, message: dict, t_web_received: float):
+    lock = get_user_lock(phone_number)
+    async with lock:
+        import time
+        t_bg_start = time.perf_counter()
+        print(f"--- [WHATSAPP BG DISPATCH] Time since Webhook received: {t_bg_start - t_web_received:.4f}s ---")
     
-    if msg_type == "text":
-        text = message["text"]["body"]
-        await handle_text_message(phone_number, text, t_web_received)
+        msg_type = message.get("type")
         
-    elif msg_type == "document":
-        document = message["document"]
-        media_id = document.get("id")
-        filename = document.get("filename", f"wa_doc_{media_id}.pdf")
+        if msg_type == "text":
+            text = message["text"]["body"]
+            await handle_text_message(phone_number, text, t_web_received)
         
-        if not filename.endswith(".pdf"):
-            await wa_service.send_message(phone_number, "Sorry, I can only process PDF documents right now.")
-            return
+        elif msg_type == "document":
+            document = message["document"]
+            media_id = document.get("id")
+            filename = document.get("filename", f"wa_doc_{media_id}.pdf")
             
-        print(f"--- [WHATSAPP PDF UPLOAD DETECTED] File: {filename} ---")
-        t_confirm_start = time.perf_counter()
-        # Send instant receipt confirmation so user knows it's processing
-        await wa_service.send_message(
-            phone_number, 
-            f"📥 Received '{filename}'. I am downloading and indexing it for you now—this will take just a few seconds. I will let you know the moment it is ready!"
-        )
-        print(f"--- [WHATSAPP PDF confirm msg sent] Time taken to send confirmation message: {time.perf_counter() - t_confirm_start:.4f}s ---")
-        
-        try:
-            t_dl_start = time.perf_counter()
-            filepath = await wa_service.download_media(media_id, filename)
-            print(f"--- [WHATSAPP PDF downloaded] Time taken to download from Meta: {time.perf_counter() - t_dl_start:.4f}s ---")
-            
-            if not filepath:
-                await wa_service.send_message(phone_number, f"❌ Failed to download '{filename}'. Please try uploading it again.")
+            if not filename.endswith(".pdf"):
+                await wa_service.send_message(phone_number, "Sorry, I can only process PDF documents right now.")
                 return
                 
-            t_idx_start = time.perf_counter()
-            chunks = await wa_bot.process_new_pdf(filepath)
-            print(f"--- [WHATSAPP PDF indexed] Time taken to index embeddings: {time.perf_counter() - t_idx_start:.4f}s | Chunks: {chunks} ---")
+            print(f"--- [WHATSAPP PDF UPLOAD DETECTED] File: {filename} ---")
             
-            if chunks > 0:
-                await wa_service.set_user_file(phone_number, filename)
-                t_success_send = time.perf_counter()
-                await wa_service.send_message(
+            try:
+                t_parallel_start = time.perf_counter()
+                # Run sending of confirmation message and media download in parallel!
+                confirm_task = wa_service.send_message(
                     phone_number, 
-                    f"✅ '{filename}' has been fully indexed and is now active! You can start asking questions about it."
+                    f"📥 Received '{filename}'. I am downloading and indexing it for you now—this will take just a few seconds. I will let you know the moment it is ready!"
                 )
-                print(f"--- [WHATSAPP PDF success msg sent] Time taken to send success message: {time.perf_counter() - t_success_send:.4f}s ---")
-            else:
-                await wa_service.send_message(phone_number, f"❌ Failed to extract text from '{filename}'. It might be corrupted or protected.")
-        except Exception as e:
-            print(f"--- [ERROR] Background document processing failed: {e} ---")
-            await wa_service.send_message(phone_number, f"❌ An error occurred while processing '{filename}'.")
-            
-    print(f"=== [WHATSAPP BG COMPLETED] Total processing time: {time.perf_counter() - t_bg_start:.4f}s ===")
+                download_task = wa_service.download_media(media_id, filename)
+                
+                _, filepath = await asyncio.gather(confirm_task, download_task)
+                print(f"--- [PERF] Concurrently sent confirmation and downloaded media in: {time.perf_counter() - t_parallel_start:.4f}s ---")
+                
+                if not filepath:
+                    await wa_service.send_message(phone_number, f"❌ Failed to download '{filename}'. Please try uploading it again.")
+                    return
+                    
+                t_idx_start = time.perf_counter()
+                chunks = await wa_bot.process_new_pdf(filepath)
+                print(f"--- [WHATSAPP PDF indexed] Time taken to index embeddings: {time.perf_counter() - t_idx_start:.4f}s | Chunks: {chunks} ---")
+                
+                if chunks > 0:
+                    await wa_service.set_user_file(phone_number, filename)
+                    t_success_send = time.perf_counter()
+                    await wa_service.send_message(
+                        phone_number, 
+                        f"✅ '{filename}' has been fully indexed and is now active! You can start asking questions about it."
+                    )
+                    print(f"--- [WHATSAPP PDF success msg sent] Time taken to send success message: {time.perf_counter() - t_success_send:.4f}s ---")
+                    
+                    caption = document.get("caption")
+                    if caption:
+                        print(f"--- [WHATSAPP PDF caption detected] Processing caption: {caption} ---")
+                        await handle_text_message(phone_number, caption, t_web_received)
+                else:
+                    await wa_service.send_message(phone_number, f"❌ Failed to extract text from '{filename}'. It might be corrupted or protected.")
+            except Exception as e:
+                print(f"--- [ERROR] Background document processing failed: {e} ---")
+                await wa_service.send_message(phone_number, f"❌ An error occurred while processing '{filename}'.")
+                
+            print(f"=== [WHATSAPP BG COMPLETED] Total processing time: {time.perf_counter() - t_bg_start:.4f}s ===")
 
 async def handle_text_message(phone_number: str, text: str, t_web_received: float):
     import time
@@ -120,10 +133,43 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     history = wa_service.get_user_history(phone_number)
     active_file = wa_service.get_user_file(phone_number)
 
+    web_files = sorted(list(wa_bot.doc_service_web.get_indexed_files()))
+    wa_files = sorted(list(wa_bot.doc_service_wa.get_indexed_files()))
+    
+    seen = set()
+    all_files = []
+    for f in (web_files + wa_files):
+        if f not in seen:
+            seen.add(f)
+            all_files.append(f)
+            
+    prepend_msg = ""
+    
+    if not active_file and all_files:
+        text_clean = text.strip()
+        selected_file = None
+        if text_clean.isdigit():
+            idx = int(text_clean) - 1
+            if 0 <= idx < len(all_files):
+                selected_file = all_files[idx]
+        else:
+            # Check for exact or partial filename match (case-insensitive)
+            matches = [f for f in all_files if text_clean.lower() in f]
+            if len(matches) == 1:
+                selected_file = matches[0]
+                
+        if selected_file:
+            active_file = selected_file
+            await wa_service.set_user_file(phone_number, selected_file)
+            text = "what is this document all about ??"
+
     print(f"--- [WHATSAPP TEXT ROUTE] Starting LLM ask() generator... ---")
     # Process RAG Query via bot
     # Note: bot.ask returns an AsyncIterable[str]. We accumulate the chunks.
     response_chunks = []
+    if prepend_msg:
+        response_chunks.append(prepend_msg)
+        
     try:
         async for chunk in wa_bot.ask(query=text, history=history, active_file=active_file):
             response_chunks.append(chunk)
