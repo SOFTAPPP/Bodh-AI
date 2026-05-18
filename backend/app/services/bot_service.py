@@ -197,6 +197,7 @@ class PDFChatBot:
         if session.qa_chain:
             docs, context_text = await session.qa_chain.ainvoke(
                 query=standalone_query,
+                embedding=search_embedding,
                 history=history,
                 domain=domain,
                 similarity_threshold=similarity_threshold,
@@ -216,6 +217,7 @@ class PDFChatBot:
             if session.qa_chain:
                 docs, context_text = await session.qa_chain.ainvoke(
                     query=standalone_query,
+                    embedding=search_embedding,
                     history=history,
                     domain=domain,
                     similarity_threshold=-1.0,  # Zero-threshold fallback retry

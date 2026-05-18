@@ -56,7 +56,7 @@ class Config:
             "chunk_size": 800,
             "chunk_overlap": 150,
             "top_k": 8,
-            "similarity_threshold": 0.25,
+            "similarity_threshold": 0.15,
             "description": "Resume/CV docs need moderate chunks for skill/experience extraction",
         },
         "financial": {

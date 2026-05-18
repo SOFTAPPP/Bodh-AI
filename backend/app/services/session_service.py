@@ -17,6 +17,7 @@ class QAChain:
     async def ainvoke(
         self,
         query: str,
+        embedding: List[float],
         history: List[dict],
         domain: str,
         similarity_threshold: float,
@@ -27,8 +28,8 @@ class QAChain:
         vectorstore = self.retriever.vectorstore
         k = self.retriever.search_kwargs.get("k", 12)
         
-        # Search with similarity scores (L2 distance squared)
-        scored_raw = vectorstore.similarity_search_with_score(query, k=k)
+        # Search with similarity scores (L2 distance squared) using pre-computed vector embedding
+        scored_raw = vectorstore.similarity_search_with_score_by_vector(embedding, k=k)
         
         # Convert L2 distance score to cosine similarity proxy: cosine_similarity ≈ 1.0 - (L2_distance^2 / 2)
         # Note: Langchain FAISS returns the squared L2 distance as the score.

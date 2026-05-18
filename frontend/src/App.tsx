@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, type JSX } from 'react';
-import { Upload, Send, FileText, Bot, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon, Home } from 'lucide-react';
+import { Upload, Send, FileText, Bot, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon, Home, Pause } from 'lucide-react';
 import './App.css';
 
 interface Message {
@@ -63,6 +63,8 @@ function App() {
   const [leadForm, setLeadForm] = useState({ name: '', email: '', business_type: '' });
   const [leadSent, setLeadSent] = useState(false);
   const [sessionId] = useState(() => Math.random().toString(36).substring(2, 15));
+  const [isStreaming, setIsStreaming] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
@@ -196,8 +198,17 @@ function App() {
     }
   };
 
+  const handleAbortMessage = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
+    setIsThinking(false);
+  };
+
   const handleSendMessage = async () => {
-    if (!input.trim() || isThinking) return;
+    if (!input.trim() || isThinking || isStreaming) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -208,6 +219,7 @@ function App() {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsThinking(true);
+    setIsStreaming(true);
 
     const botMsgId = (Date.now() + 1).toString();
     const botPlaceholder: Message = {
@@ -218,6 +230,9 @@ function App() {
     };
 
     setMessages(prev => [...prev, botPlaceholder]);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const isDemoMode = !currentFile;
@@ -232,6 +247,7 @@ function App() {
           demo_mode: isDemoMode,
           session_id: sessionId,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) throw new Error('Network response was not ok');
@@ -239,24 +255,6 @@ function App() {
       const serverActiveFile = response.headers.get('X-Active-File');
       if (serverActiveFile && serverActiveFile !== currentFile) {
         setCurrentFile(serverActiveFile);
-        // Show a brief selection confirmation if the active document changed
-        if (!currentFile || currentFile.toLowerCase() !== serverActiveFile.toLowerCase()) {
-          setMessages(prev => {
-            const updated = [...prev];
-            const placeholderIdx = updated.findIndex(m => m.id === botMsgId);
-            const confirmationMsg = {
-              id: (Date.now() + 2).toString(),
-              role: 'bot' as const,
-              content: `✅ Active document set to **${serverActiveFile}**`
-            };
-            if (placeholderIdx !== -1) {
-              updated.splice(placeholderIdx, 0, confirmationMsg);
-            } else {
-              updated.push(confirmationMsg);
-            }
-            return updated;
-          });
-        }
       }
 
       const reader = response.body?.getReader();
@@ -285,13 +283,22 @@ function App() {
           return prev;
         });
       }
-    } catch (error) {
-      console.error('Chat failed:', error);
-      setMessages(prev => prev.map(msg =>
-        msg.id === botMsgId ? { ...msg, content: '❌ Sorry, I encountered an error. Please try again.' } : msg
-      ));
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Streaming aborted by user');
+        setMessages(prev => prev.map(msg =>
+          msg.id === botMsgId ? { ...msg, content: msg.content + ' *(Generation stopped by user)*' } : msg
+        ));
+      } else {
+        console.error('Chat failed:', error);
+        setMessages(prev => prev.map(msg =>
+          msg.id === botMsgId ? { ...msg, content: '❌ Sorry, I encountered an error. Please try again.' } : msg
+        ));
+      }
     } finally {
       setIsThinking(false);
+      setIsStreaming(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -615,11 +622,6 @@ function App() {
                     onClick={() => {
                       if (currentFile?.toLowerCase() === file.toLowerCase()) return;
                       setCurrentFile(file);
-                      setMessages(prev => [...prev, {
-                        id: Date.now().toString(),
-                        role: 'bot',
-                        content: `✅ Active document set to **${file}**`
-                      }]);
                     }}
                     style={{ cursor: 'pointer' }}
                   >
@@ -721,7 +723,7 @@ function App() {
                   placeholder={`Ask about a ${NICHE_DEMOS[activeNiche].label.toLowerCase()} document...`}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                  onKeyDown={(e) => e.key === 'Enter' && !isThinking && !isStreaming && handleSendMessage()}
                 />
                 <button
                   className={`mic-button ${isListening ? 'listening' : ''}`}
@@ -731,12 +733,24 @@ function App() {
                 >
                   {isListening ? <MicOff size={20} /> : <Mic size={20} />}
                 </button>
-                <button
-                  className={`send-button ${!input.trim() || isThinking ? 'disabled' : ''}`}
-                  onClick={handleSendMessage}
-                >
-                  <Send size={20} />
-                </button>
+                {isThinking || isStreaming ? (
+                  <button
+                    className="send-button stop-button"
+                    onClick={handleAbortMessage}
+                    type="button"
+                    title="Stop Generating"
+                  >
+                    <Pause size={20} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    className={`send-button ${!input.trim() ? 'disabled' : ''}`}
+                    onClick={handleSendMessage}
+                    type="button"
+                  >
+                    <Send size={20} />
+                  </button>
+                )}
               </div>
             </div>
           </main>

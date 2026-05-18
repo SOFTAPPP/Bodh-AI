@@ -395,7 +395,6 @@ async def chat(request: ChatRequest):
                 else:
                     request.message = "what is this document all about ?"
                     
-                prepend_msg = f"✅ **{active_file}** selected. \n\n"
 
 
     # Pass active niche hint if present to skip heuristic classification

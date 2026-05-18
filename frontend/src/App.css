@@ -726,6 +726,17 @@
   transform: scale(1.05);
 }
 
+.send-button.stop-button {
+  background: #ef4444 !important;
+  color: white !important;
+  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4) !important;
+}
+
+.send-button.stop-button:hover {
+  background: #dc2626 !important;
+  transform: scale(1.05);
+}
+
 .mic-button {
   background: var(--card-bg);
   color: var(--text-secondary);
