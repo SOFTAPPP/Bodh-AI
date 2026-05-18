@@ -19,7 +19,7 @@ class Config:
     VECTOR_STORE_DIR  = os.path.join(DATA_DIR, "vector_store")
     INDEXED_FILES_LOG = os.path.join(DATA_DIR, "indexed_files.txt")
 
-    # Both WhatsApp and Web application point to the same shared database
+    # Both WhatsApp and Web application point to the same shared database of documents
     WA_UPLOAD_DIR        = UPLOAD_DIR
     WA_VECTOR_STORE_DIR  = VECTOR_STORE_DIR
     WA_INDEXED_FILES_LOG = INDEXED_FILES_LOG

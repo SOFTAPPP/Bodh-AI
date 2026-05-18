@@ -1,24 +1,27 @@
 import asyncio
 import numpy as np
+import os
+import shutil
 from typing import List, Dict, Optional, AsyncIterable
 from app.services.vector_service import VectorService
 from app.services.llm_service import LLMService
 from app.services.document_service import DocumentService
+from app.services.session_service import SessionManager, SessionState, QAChain
 from app.core.config import Config
-import os
 
 
 class PDFChatBot:
 
-    def __init__(self, platform: str = "web"):
+    def __init__(self, platform: str = "app"):
         """
-        platform: "web"       → uses Config.UPLOAD_DIR / VECTOR_STORE_DIR / INDEXED_FILES_LOG
+        platform: "app"       → uses Config.UPLOAD_DIR / VECTOR_STORE_DIR / INDEXED_FILES_LOG
                   "whatsapp"  → uses Config.WA_UPLOAD_DIR / WA_VECTOR_STORE_DIR / WA_INDEXED_FILES_LOG
 
         STRICT ISOLATION: Each platform can only see its own documents.
         No cross-platform document leakage.
         """
         self.platform = platform
+
         self.llm_service = LLMService()
 
         # Each platform only initializes its own services
@@ -51,9 +54,10 @@ class PDFChatBot:
         active_file: Optional[str] = None,
         niche_hint: Optional[str] = None,
         is_selection_retry: bool = False,
+        session_id: str = "default",
     ) -> AsyncIterable[str]:
         """
-        Full RAG pipeline with async streaming.
+        Full isolated RAG pipeline with async streaming.
         Yields text tokens as soon as Groq starts generating.
 
         CASE 1: No documents → instructs user to upload.
@@ -111,7 +115,7 @@ class PDFChatBot:
                 print(f"--- [AUTO-DETECT] Intelligently inferred document: {active_file} ---")
             else:
                 print(f"--- [RAG] No active file set with {len(platform_files)} files — prompting user ---")
-                msg = "I found multiple documents. Which one are you referring to?\n\n"
+                msg = "Which document are you referring to?\n\n"
                 for idx, f in enumerate(platform_files, 1):
                     msg += f"{idx}. **{f}**\n"
                 msg += "\nPlease select a document by replying with its number or name."
@@ -127,6 +131,22 @@ class PDFChatBot:
                     matched_file = f
                     break
             active_file = matched_file or active_file
+
+        # Sync the session active document and load its isolated index
+        session = SessionManager.switch_document(
+            platform=self.platform,
+            session_id=session_id,
+            new_document=active_file,
+            bot_instance=self
+        )
+
+        # REQUIRED DEBUG LOGGING FOR CONTEXT VERIFICATION
+        print({
+            "active_document": session.active_document,
+            "index_path": session.faiss_index_path,
+            "platform": self.platform,
+            "session_id": session_id
+        })
 
         if niche_hint:
             standalone_query = query
@@ -168,33 +188,43 @@ class PDFChatBot:
 
         search_embedding = hyde_embedding if hyde_embedding is not None else query_embedding
         domain_cfg = Config.get_domain_config(domain)
-        top_k = domain_cfg["top_k"]
         similarity_threshold = domain_cfg["similarity_threshold"]
 
-        filter_dict = None
-        if active_file:
-            filter_dict = {"source_file": active_file}
-        elif domain != "general":
-            filter_dict = {"domain": domain}
-
+        # Run query through the isolated QA Chain
         t_search_start = time.perf_counter()
-        docs = self.vector_service.search(
-            standalone_query,
-            k=top_k,
-            filter_dict=filter_dict,
-            embedding=search_embedding,
-            similarity_threshold=similarity_threshold,
-            active_file=active_file,
-        )
+        docs = []
+        context_text = ""
+        if session.qa_chain:
+            docs, context_text = await session.qa_chain.ainvoke(
+                query=standalone_query,
+                history=history,
+                domain=domain,
+                similarity_threshold=similarity_threshold,
+                active_file=active_file,
+                response_intent=response_intent
+            )
+        else:
+            print("--- [WARNING] QA Chain not initialized. Index likely missing or empty. ---")
 
         t_search = time.perf_counter()
         print(f"--- [PERF] Vector Search: {t_search - t_search_start:.4f}s | "
-              f"{len(docs)} chunks [domain={domain}, top_k={top_k}, threshold={similarity_threshold}] ---")
+              f"{len(docs)} chunks [domain={domain}, threshold={similarity_threshold}] ---")
 
         # ── Fallback when no docs pass threshold for the active file ────────────
         if not docs and active_file:
-            print(f"--- [FALLBACK] No docs above threshold for '{active_file}'. ---")
-            msg = f"I could not find this information inside the selected document."
+            print(f"--- [FALLBACK] No docs above threshold for '{active_file}'. Retrying with 0.0 threshold... ---")
+            if session.qa_chain:
+                docs, context_text = await session.qa_chain.ainvoke(
+                    query=standalone_query,
+                    history=history,
+                    domain=domain,
+                    similarity_threshold=-1.0,  # Zero-threshold fallback retry
+                    active_file=active_file,
+                    response_intent=response_intent
+                )
+        if not docs and active_file:
+            print(f"--- [FALLBACK] Still no docs retrieved for '{active_file}' after 0.0 retry. ---")
+            msg = "This information was not found in the selected document."
             
             other_files = [f for f in platform_files if f.lower() != active_file.lower()]
             if other_files:
@@ -211,16 +241,6 @@ class PDFChatBot:
 
         meta_domain  = docs[0].metadata.get("domain", "general")
         final_domain = domain or meta_domain
-
-        sorted_docs = sorted(
-            docs,
-            key=lambda x: (x.metadata.get("source_file", ""), x.metadata.get("chunk_index", 0))
-        )
-        context_text = "\n\n".join(
-            f"--- SOURCE: {d.metadata.get('source_file', 'unknown')} | "
-            f"Page {d.metadata.get('page', '?')} ---\n{d.page_content}"
-            for d in sorted_docs
-        )
 
         t_gen = time.perf_counter()
         first_token = False
@@ -242,14 +262,44 @@ class PDFChatBot:
         if full_response:
             self._cache_store(query_embedding, full_response, domain, active_file)
 
-    async def process_new_pdf(self, file_path: str) -> int:
-        """Indexes a single PDF into FAISS (runs in background task)."""
+        # ── Append selection prompt if information not found and other options exist ──
+        if "This information was not found in the selected document" in full_response:
+            other_files = [f for f in platform_files if f.lower() != active_file.lower()]
+            if other_files:
+                append_msg = "\n\nWould you like to search another document? Here are the available options:\n\n"
+                for idx, f in enumerate(other_files, 1):
+                    append_msg += f"{idx}. **{f}**\n"
+                append_msg += "\nPlease select a document by replying with its number or name."
+                yield append_msg
+
+    async def process_new_pdf(self, file_path: str, session_id: str = "default") -> int:
+        """Indexes a single PDF into its isolated FAISS index (runs in background task)."""
         try:
+            filename = os.path.basename(file_path).lower()
+            clean_doc = "".join(c for c in filename if c.isalnum() or c in (".", "_", "-")).lower()
+            
+            # Destination path: data/indexes/<session_id>/<doc_name>/
+            dest_dir = os.path.join(Config.DATA_DIR, "indexes", session_id, clean_doc)
+            os.makedirs(dest_dir, exist_ok=True)
+            
             loop = asyncio.get_event_loop()
             chunks = await loop.run_in_executor(None, self.doc_service.process_pdf, file_path)
-            await loop.run_in_executor(None, self.vector_service.add_documents, chunks)
-            self.doc_service.mark_as_indexed(os.path.basename(file_path))
-            print(f"--- Indexed {len(chunks)} chunks from {os.path.basename(file_path)} ---")
+            
+            # Create isolated VectorService for this directory and add documents
+            session_vector_service = VectorService(store_dir=dest_dir)
+            await loop.run_in_executor(None, session_vector_service.add_documents, chunks)
+            
+            self.doc_service.mark_as_indexed(filename)
+            print(f"--- Indexed {len(chunks)} chunks from {filename} into {dest_dir} ---")
+            
+            # If session_id is not default, also save a copy to the default path for future sessions
+            if session_id != "default":
+                default_dir = os.path.join(Config.DATA_DIR, "indexes", "default", clean_doc)
+                os.makedirs(default_dir, exist_ok=True)
+                for f in os.listdir(dest_dir):
+                    shutil.copy2(os.path.join(dest_dir, f), os.path.join(default_dir, f))
+                print(f"--- Cached index for {filename} into default path: {default_dir} ---")
+                
             return len(chunks)
         except Exception as e:
             print(f"--- Error processing {file_path}: {e} ---")
@@ -258,6 +308,9 @@ class PDFChatBot:
     async def sync_data_folder(self) -> int:
         """Parallel indexing of all un-indexed PDFs in this platform's uploads folder."""
         upload_dir = self.doc_service.upload_dir
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir, exist_ok=True)
+            return 0
         indexed_files = self.doc_service.get_indexed_files()
         pending = [
             os.path.join(upload_dir, f)
@@ -267,7 +320,7 @@ class PDFChatBot:
         if not pending:
             return 0
         print(f"--- [{self.platform}] Parallel Indexing {len(pending)} pending file(s)... ---")
-        results = await asyncio.gather(*[self.process_new_pdf(f) for f in pending])
+        results = await asyncio.gather(*[self.process_new_pdf(f, session_id="default") for f in pending])
         return sum(results)
 
     def _get_domain_cache(self, domain: str, active_file: Optional[str]) -> List[Dict]:

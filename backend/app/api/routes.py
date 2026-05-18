@@ -219,16 +219,36 @@ async def upload_pdf(
 
     indexed_files = bot.doc_service.get_indexed_files()
     if file.filename.lower() in indexed_files:
+        # Even if already indexed globally, register and switch document for this session
+        if session_id:
+            if session_id not in _sessions:
+                _sessions[session_id] = {"active_file": None}
+            _sessions[session_id]["active_file"] = file.filename.lower()
+            from app.services.session_service import SessionManager
+            SessionManager.switch_document(
+                platform="app",
+                session_id=session_id,
+                new_document=file.filename.lower(),
+                bot_instance=bot
+            )
         return {"filename": file.filename.lower(), "status": "already_indexed",
                 "message": "File is already in the knowledge base."}
 
-    await bot.process_new_pdf(upload_path)
+    session_id_val = session_id or "default"
+    await bot.process_new_pdf(upload_path, session_id=session_id_val)
     
     # Auto-switch active document for the session
     if session_id:
         if session_id not in _sessions:
             _sessions[session_id] = {"active_file": None}
         _sessions[session_id]["active_file"] = file.filename.lower()
+        from app.services.session_service import SessionManager
+        SessionManager.switch_document(
+            platform="app",
+            session_id=session_id,
+            new_document=file.filename.lower(),
+            bot_instance=bot
+        )
 
     return {"filename": file.filename.lower(), "status": "ready",
             "message": f"'{file.filename}' has been fully indexed and is now active! You can start asking questions about it."}
@@ -275,8 +295,8 @@ async def chat(request: ChatRequest):
             last_assistant_msg = turn.get("content", "")
             break
 
-    is_not_found_fallback = "I could not find this information in the selected document" in last_assistant_msg
-    is_ambiguous_fallback = "I found multiple documents" in last_assistant_msg
+    is_not_found_fallback = "This information was not found in the selected document" in last_assistant_msg
+    is_ambiguous_fallback = "Which document are you referring to?" in last_assistant_msg
     is_fallback_selection = is_not_found_fallback or is_ambiguous_fallback
 
     # Resolve session and active file using ONLY web-platform files (strict isolation)
@@ -286,10 +306,23 @@ async def chat(request: ChatRequest):
 
     all_files = bot.get_indexed_files()  # web-only
 
-    # If the UI actively passes an active_file, we MIGHT sync it, but prompt says DO NOT trust frontend-only state.
-    # However, since the user wants to avoid manual switching, we rely on _sessions.
     previous_active_file = _sessions[session_id].get("active_file")
     active_file = previous_active_file
+
+    # Sync backend session with frontend chosen active_file (if user switched files via UI)
+    if request.active_file and request.active_file.lower() != (previous_active_file or "").lower():
+        if any(f.lower() == request.active_file.lower() for f in all_files):
+            active_file = next(f for f in all_files if f.lower() == request.active_file.lower())
+            _sessions[session_id]["active_file"] = active_file
+            print(f"--- [SESSION] Synced session active file to frontend choice: {active_file} ---")
+
+    from app.services.session_service import SessionManager
+    session = SessionManager.switch_document(
+        platform="app",
+        session_id=session_id,
+        new_document=active_file,
+        bot_instance=bot
+    )
 
     if is_fallback_selection and active_file:
         if is_not_found_fallback:
@@ -298,6 +331,12 @@ async def chat(request: ChatRequest):
             target_list = all_files
         active_file = None  # Clear to force resolution
         _sessions[session_id]["active_file"] = None
+        SessionManager.switch_document(
+            platform="app",
+            session_id=session_id,
+            new_document=None,
+            bot_instance=bot
+        )
     else:
         target_list = all_files
         
@@ -334,6 +373,12 @@ async def chat(request: ChatRequest):
         if selected_file:
             active_file = selected_file
             _sessions[session_id]["active_file"] = active_file
+            session = SessionManager.switch_document(
+                platform="app",
+                session_id=session_id,
+                new_document=active_file,
+                bot_instance=bot
+            )
             
             if is_selection_retry:
                 # Find user's original query before the selection prompt
@@ -378,12 +423,15 @@ async def chat(request: ChatRequest):
             active_file,
             niche_hint=request.niche,
             is_selection_retry=is_selection_retry,
+            session_id=session_id,
         ):
             if first:
                 print(f"--- [WEB APP RAG] First Token: {time.perf_counter() - t_gen_start:.4f}s ---")
                 first = False
             yield chunk
         print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
+        # Sync memory state
+        session.memory = effective_history
 
     # Determine the effective active_file for the response header
     # (includes auto-selected single-doc case handled inside bot.ask())

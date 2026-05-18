@@ -3,11 +3,19 @@
     "history": [
       {
         "role": "user",
-        "content": "What is the name of the candidate??"
+        "content": "Hi"
       },
       {
         "role": "assistant",
-        "content": "This information was not found in the selected document."
+        "content": "Hello. It's lovely to meet you. Is there something I can help you with or would you like to chat for a bit? If you have a document you'd like me to take a look at, I'd be more than happy to assist you. You can upload a PDF, such as a legal, medical, financial, or HR paper, and I can analyze it and answer any questions you might have about it. What's on your mind today?"
+      },
+      {
+        "role": "user",
+        "content": "Hi"
+      },
+      {
+        "role": "assistant",
+        "content": "It's great to meet you too. I see you're saying hello, but I don't see a document to work with just yet. That's perfectly fine. If you're ready, you can upload a PDF document - maybe something related to law, medicine, finances, or human resources - and I'll be happy to dive in and help you understand it better. If not, we can definitely chat and get to know each other a bit. What's been on your mind lately, or is there something specific you're looking for help with?"
       }
     ],
     "last_file": "027-2025 Review Notice_250924_155430.pdf"

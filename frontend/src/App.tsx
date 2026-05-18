@@ -155,19 +155,15 @@ function App() {
         const data = await response.json();
         setCurrentFile(data.filename);
 
-        const isAlreadyIndexed = data.status === 'already_indexed';
-        const isReady = data.status === 'ready';
-        const msg = isAlreadyIndexed
-          ? `**${data.filename}** is ready.`
-          : `Successfully uploaded **${data.filename}**. Continue with your query`;
+        const msg = `Successfully uploaded **${data.filename}**`;
 
-        setMessages([{
+        setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'bot',
           content: msg
         }]);
 
-        if (isAlreadyIndexed || isReady) {
+        if (data.status === 'already_indexed' || data.status === 'ready') {
           await fetchFiles();
         } else {
           // Poll for the file to appear in indexed list (background indexing)
@@ -243,8 +239,8 @@ function App() {
       const serverActiveFile = response.headers.get('X-Active-File');
       if (serverActiveFile && serverActiveFile !== currentFile) {
         setCurrentFile(serverActiveFile);
-        // Show a brief selection confirmation if this was an auto-selection
-        if (!currentFile) {
+        // Show a brief selection confirmation if the active document changed
+        if (!currentFile || currentFile.toLowerCase() !== serverActiveFile.toLowerCase()) {
           setMessages(prev => {
             const updated = [...prev];
             const placeholderIdx = updated.findIndex(m => m.id === botMsgId);
@@ -616,6 +612,16 @@ function App() {
                   <div
                     key={file}
                     className={`file-item ${currentFile?.toLowerCase() === file.toLowerCase() ? 'active' : ''}`}
+                    onClick={() => {
+                      if (currentFile?.toLowerCase() === file.toLowerCase()) return;
+                      setCurrentFile(file);
+                      setMessages(prev => [...prev, {
+                        id: Date.now().toString(),
+                        role: 'bot',
+                        content: `✅ Active document set to **${file}**`
+                      }]);
+                    }}
+                    style={{ cursor: 'pointer' }}
                   >
                     <FileText size={16} className="file-item-icon" />
                     <span className="file-item-name" title={file}>{file}</span>
