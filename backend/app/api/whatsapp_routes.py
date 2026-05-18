@@ -188,24 +188,22 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     prepend_msg = ""
     is_selection_retry = False
     
-    if not active_file and target_list:
+    # ── 1. Check if the user is replying to a document selection prompt ─────
+    if is_fallback_selection and target_list:
         text_clean = text.strip()
         selected_file = None
         
-        # 1. Check numeric selection
         if text_clean.isdigit():
             idx = int(text_clean) - 1
             if 0 <= idx < len(target_list):
                 selected_file = target_list[idx]
                 is_selection_retry = True
         else:
-            # 2. Check for exact or partial filename match (case-insensitive)
             matches = [f for f in target_list if text_clean.lower() in f.lower()]
             if len(matches) == 1:
                 selected_file = matches[0]
                 is_selection_retry = True
                 
-            # 3. Smart Document Detection based on query keywords
             if not selected_file and len(target_list) > 1:
                 q_words = set(text_clean.lower().split())
                 for f in target_list:
@@ -226,7 +224,6 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
             )
             
             if is_selection_retry:
-                # Find user's original query before the selection prompt
                 original_query = None
                 for turn in reversed(history):
                     if turn.get("role") == "user":
@@ -241,6 +238,44 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
                     text = "what is this document all about ?"
                     
                 prepend_msg = f"✅ **{active_file}** selected. \n\n"
+
+    # ── 2. Run Intelligent Multi-Document Routing (if not selection retry) ──
+    if not is_selection_retry and all_files:
+        intent = await wa_bot.llm_service.analyze_query(text, history)
+        standalone_query = intent.get("standalone_query", text)
+        
+        route_res = await wa_bot.route_query(standalone_query, all_files)
+        confidence = route_res["confidence"]
+        best_doc = route_res["best_doc"]
+        
+        if confidence == "HIGH":
+            if not active_file or active_file.lower() != best_doc.lower():
+                prepend_msg = f"*(Auto-switched context to {best_doc})*\n\n"
+                print(f"--- [ROUTE SYNCHRONIZER] Auto-switching WhatsApp from {active_file} to {best_doc} ---")
+                active_file = best_doc
+                await wa_service.set_user_file(phone_number, active_file)
+                session = SessionManager.switch_document(
+                    platform="whatsapp",
+                    session_id=phone_number,
+                    new_document=active_file,
+                    bot_instance=wa_bot
+                )
+        elif confidence in ("MEDIUM", "LOW"):
+            print(f"--- [ROUTE SYNCHRONIZER] WhatsApp Ambiguity or Low Confidence ({confidence}) detected. Prompting user. ---")
+            msg = "Which document are you referring to?\n\n"
+            for idx, f in enumerate(all_files, 1):
+                msg += f"{idx}. **{f}**\n"
+            msg += "\nPlease select a document by replying with its number or name."
+            await wa_service.set_user_file(phone_number, None)
+            SessionManager.switch_document(
+                platform="whatsapp",
+                session_id=phone_number,
+                new_document=None,
+                bot_instance=wa_bot
+            )
+            await wa_service.add_conversation_turn(phone_number, text, msg)
+            await wa_service.send_message(phone_number, msg)
+            return
 
     print(f"--- [WHATSAPP TEXT ROUTE] Starting LLM ask() generator... ---")
     # Process RAG Query via bot

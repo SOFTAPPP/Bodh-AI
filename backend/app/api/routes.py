@@ -343,24 +343,22 @@ async def chat(request: ChatRequest):
     prepend_msg = ""
     is_selection_retry = False
     
-    if not active_file and target_list:
+    # ── 1. Check if the user is replying to a document selection prompt ─────
+    if is_fallback_selection and target_list:
         text_clean = request.message.strip()
         selected_file = None
         
-        # 1. Check numeric selection
         if text_clean.isdigit():
             idx = int(text_clean) - 1
             if 0 <= idx < len(target_list):
                 selected_file = target_list[idx]
                 is_selection_retry = True
         else:
-            # 2. Check for exact or partial filename match (case-insensitive)
             matches = [f for f in target_list if text_clean.lower() in f.lower()]
             if len(matches) == 1:
                 selected_file = matches[0]
                 is_selection_retry = True
             
-            # 3. Smart Document Detection based on query keywords
             if not selected_file and len(target_list) > 1:
                 q_words = set(text_clean.lower().split())
                 for f in target_list:
@@ -369,7 +367,7 @@ async def chat(request: ChatRequest):
                     if any(w in f_name_lower for w in q_words if len(w) > 3) or text_clean.lower() in f_name_no_ext:
                         selected_file = f
                         break
-                
+                        
         if selected_file:
             active_file = selected_file
             _sessions[session_id]["active_file"] = active_file
@@ -381,7 +379,6 @@ async def chat(request: ChatRequest):
             )
             
             if is_selection_retry:
-                # Find user's original query before the selection prompt
                 original_query = None
                 for turn in reversed(request.history):
                     if turn.get("role") == "user":
@@ -389,11 +386,50 @@ async def chat(request: ChatRequest):
                         if not content.isdigit() and len(content) > 3:
                             original_query = content
                             break
-                
                 if original_query:
                     request.message = original_query
                 else:
                     request.message = "what is this document all about ?"
+
+
+    # ── 2. Run Intelligent Multi-Document Routing (if not selection retry) ──
+    if not is_selection_retry and all_files:
+        # Determine intent / standalone query
+        if request.niche:
+            standalone_query = request.message
+        else:
+            intent = await bot.llm_service.analyze_query(request.message, request.history)
+            standalone_query = intent.get("standalone_query", request.message)
+            
+        route_res = await bot.route_query(standalone_query, all_files)
+        confidence = route_res["confidence"]
+        best_doc = route_res["best_doc"]
+        
+        if confidence == "HIGH":
+            if not active_file or active_file.lower() != best_doc.lower():
+                print(f"--- [ROUTE SYNCHRONIZER] Auto-switching from {active_file} to {best_doc} ---")
+                active_file = best_doc
+                _sessions[session_id]["active_file"] = active_file
+                session = SessionManager.switch_document(
+                    platform="app",
+                    session_id=session_id,
+                    new_document=active_file,
+                    bot_instance=bot
+                )
+        elif confidence in ("MEDIUM", "LOW"):
+            print(f"--- [ROUTE SYNCHRONIZER] Ambiguity or Low Confidence ({confidence}) detected. Prompting user. ---")
+            msg = "Which document are you referring to?\n\n"
+            for idx, f in enumerate(all_files, 1):
+                msg += f"{idx}. **{f}**\n"
+            msg += "\nPlease select a document by replying with its number or name."
+            _sessions[session_id]["active_file"] = None
+            SessionManager.switch_document(
+                platform="app",
+                session_id=session_id,
+                new_document=None,
+                bot_instance=bot
+            )
+            return StreamingResponse(iter([msg]), media_type="text/plain")
                     
 
 

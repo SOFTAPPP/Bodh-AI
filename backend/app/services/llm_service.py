@@ -133,8 +133,16 @@ class LLMService:
     def _get_domain_protocol(self, domain: str, intent: str = "fact_extraction") -> str:
         """
         Returns an enhanced, structured domain-specific system prompt.
-        Each domain has a precise output structure for maximum precision.
+        If intent is fact_extraction, returns a clean, direct lookup prompt to prevent rigid formatting.
+        If intent is complex_analysis, returns the structured forensic analysis protocol.
         """
+        if intent == "fact_extraction":
+            return (
+                "You are an expert document assistant. Your task is to answer the user's question "
+                "directly, naturally, and concisely based ONLY on the provided context.\n"
+                "Do NOT use any rigid structured headers, points, or templates. Answer like a friendly, helpful expert."
+            )
+
         protocols = {
             "legal": (
                 "⚖️ SUPREME FORENSIC ANALYST — Legal Document Intelligence\n\n"
@@ -333,3 +341,31 @@ class LLMService:
                 print(f"--- [CHITCHAT ERROR] {label}: {e} ---")
                 continue
         yield "Hello! I'm here. How can I help you today?"
+
+    async def generate_document_metadata(self, filename: str, text_sample: str) -> dict:
+        """
+        Generates a short summary and keywords for the document text sample.
+        """
+        prompt = (
+            "You are an AI document classifier. Analyze the following excerpt from a document "
+            f"named '{filename}' and extract its main topics/keywords and a brief 2-sentence summary.\n\n"
+            "Output ONLY a valid JSON object with the following structure (no markdown formatting, no fences):\n"
+            '{\n  "summary": "A 2-sentence summary of the document contents and purpose.",\n  "topics": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]\n}\n\n'
+            f"Document Excerpt:\n{text_sample[:4000]}"
+        )
+        try:
+            resp = await self.fallback_llm.ainvoke([HumanMessage(content=prompt)], config={"max_tokens": 200})
+            content = resp.content.strip()
+            # Clean possible markdown block formatting
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+        except Exception as e:
+            print(f"--- Error generating document metadata: {e} ---")
+        
+        # Fallback metadata if LLM call fails
+        return {
+            "summary": f"This document contains information related to {filename}.",
+            "topics": [filename.replace(".pdf", ""), "document"]
+        }
+

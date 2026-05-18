@@ -7,9 +7,9 @@ from app.api.whatsapp_routes import router as wa_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Warm up model eagerly so server is 100% ready BEFORE accepting connections
+    # Startup: Warm up embedding model in a non-blocking background thread so server starts instantly
     from app.api.routes import bot
-    await asyncio.to_thread(bot.vector_service.warmup)
+    asyncio.create_task(asyncio.to_thread(bot.vector_service.warmup))
     yield
 
 app = FastAPI(
