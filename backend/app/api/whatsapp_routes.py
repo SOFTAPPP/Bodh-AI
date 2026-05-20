@@ -8,7 +8,7 @@ import os
 
 router = APIRouter()
 wa_service = WhatsAppService()
-# Completely isolated bot — uses wa_uploads/ and wa_vector_store/, invisible to the web app
+# isolate bot
 wa_bot = PDFChatBot(platform="whatsapp")
 
 @router.get("/webhook")
@@ -35,23 +35,23 @@ async def webhook_events(request: Request, background_tasks: BackgroundTasks):
     except Exception:
         return {"status": "ok"}
     
-    # Check if it's a WhatsApp status update (message delivered/read, etc.)
+    # check status
     if "entry" in body and body["entry"]:
         entry = body["entry"][0]
         if "changes" in entry and entry["changes"]:
             change = entry["changes"][0]
             value = change.get("value", {})
             
-            # Extract messages
+            # get messages
             if "messages" in value and value["messages"]:
                 message = value["messages"][0]
                 phone_number = message.get("from")
                 
                 print(f"=== [WHATSAPP WEBHOOK RECEIVED] Time: {datetime.utcnow().isoformat()} | Phone: {phone_number} ===")
-                # Background processing so we can return 200 OK immediately to Meta
+                # handle async
                 background_tasks.add_task(process_whatsapp_message, phone_number, message, t_web_received)
 
-    # Always return 200 OK to Meta
+
     return {"status": "ok"}
 user_locks = {}
 
@@ -67,7 +67,7 @@ async def process_whatsapp_message(phone_number: str, message: dict, t_web_recei
         t_bg_start = time.perf_counter()
         print(f"--- [WHATSAPP BG DISPATCH] Time since Webhook received: {t_bg_start - t_web_received:.4f}s ---")
     
-        # Ensure directory structures exist before handling any message
+        # setup dirs
         from app.core.config import Config
         os.makedirs(Config.WA_UPLOAD_DIR, exist_ok=True)
         os.makedirs(Config.WA_VECTOR_STORE_DIR, exist_ok=True)
@@ -91,10 +91,10 @@ async def process_whatsapp_message(phone_number: str, message: dict, t_web_recei
             
             try:
                 t_parallel_start = time.perf_counter()
-                # Run sending of confirmation message and media download in parallel!
+                # handle media
                 confirm_task = wa_service.send_message(
                     phone_number, 
-                    f"📥 Received '{filename}'. I am downloading and indexing it for you now—this will take just a few seconds. I will let you know the moment it is ready!"
+                    f"Received '{filename}'. I am downloading and indexing it for you now—this will take just a few seconds. I will let you know the moment it is ready!"
                 )
                 download_task = wa_service.download_media(media_id, filename)
                 
@@ -102,7 +102,7 @@ async def process_whatsapp_message(phone_number: str, message: dict, t_web_recei
                 print(f"--- [PERF] Concurrently sent confirmation and downloaded media in: {time.perf_counter() - t_parallel_start:.4f}s ---")
                 
                 if not filepath:
-                    await wa_service.send_message(phone_number, f"❌ Failed to download '{filename}'. Please try uploading it again.")
+                    await wa_service.send_message(phone_number, f"Failed to download '{filename}'. Please try uploading it again.")
                     return
                     
                 t_idx_start = time.perf_counter()
@@ -111,7 +111,7 @@ async def process_whatsapp_message(phone_number: str, message: dict, t_web_recei
                 
                 if chunks > 0:
                     await wa_service.set_user_file(phone_number, filename)
-                    # Automatically switch document context and purge old states/retrievers
+                    # switch doc
                     SessionManager.switch_document(
                         platform="whatsapp",
                         session_id=phone_number,
@@ -121,7 +121,7 @@ async def process_whatsapp_message(phone_number: str, message: dict, t_web_recei
                     t_success_send = time.perf_counter()
                     await wa_service.send_message(
                         phone_number, 
-                        f"✅ '{filename}' has been fully indexed and is now active! You can start asking questions about it."
+                        f"'{filename}' has been fully indexed and is now active! You can start asking questions about it."
                     )
                     print(f"--- [WHATSAPP PDF success msg sent] Time taken to send success message: {time.perf_counter() - t_success_send:.4f}s ---")
                     
@@ -130,10 +130,10 @@ async def process_whatsapp_message(phone_number: str, message: dict, t_web_recei
                         print(f"--- [WHATSAPP PDF caption detected] Processing caption: {caption} ---")
                         await handle_text_message(phone_number, caption, t_web_received)
                 else:
-                    await wa_service.send_message(phone_number, f"❌ Failed to extract text from '{filename}'. It might be corrupted or protected.")
+                    await wa_service.send_message(phone_number, f"Failed to extract text from '{filename}'. It might be corrupted or protected.")
             except Exception as e:
                 print(f"--- [ERROR] Background document processing failed: {e} ---")
-                await wa_service.send_message(phone_number, f"❌ An error occurred while processing '{filename}'.")
+                await wa_service.send_message(phone_number, f"An error occurred while processing '{filename}'.")
                 
             print(f"=== [WHATSAPP BG COMPLETED] Total processing time: {time.perf_counter() - t_bg_start:.4f}s ===")
 
@@ -142,8 +142,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     t_llm_start = time.perf_counter()
     print(f"--- [WHATSAPP TEXT ROUTE] Loading history & active context... ---")
 
-    # Load history & active file BEFORE saving the new user message
-    # (history snapshot used for LLM context, saved together with response below)
+    # load state
     history = wa_service.get_user_history(phone_number)
     active_file = wa_service.get_user_file(phone_number)
     previous_active_file = active_file
@@ -155,7 +154,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
         bot_instance=wa_bot
     )
 
-    # Check if the last assistant message in history was asking to choose another document
+    # check fallback
     last_assistant_msg = ""
     for turn in reversed(history):
         if turn.get("role") in ("assistant", "bot"):
@@ -166,7 +165,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     is_ambiguous_fallback = "Which document are you referring to?" in last_assistant_msg
     is_fallback_selection = is_not_found_fallback or is_ambiguous_fallback
 
-    # Use ONLY WhatsApp-platform files (strict isolation)
+    # isolate files
     all_files = wa_bot.get_indexed_files()
 
     if is_fallback_selection and active_file:
@@ -174,7 +173,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
             target_list = [f for f in all_files if f.lower() != active_file.lower()]
         else:
             target_list = all_files
-        active_file = None  # Clear to force resolution
+        active_file = None  # clear file
         await wa_service.set_user_file(phone_number, None)
         SessionManager.switch_document(
             platform="whatsapp",
@@ -188,7 +187,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     prepend_msg = ""
     is_selection_retry = False
     
-    # Check if user is responding to a document selection prompt
+    # check selection
     if is_fallback_selection and target_list:
         text_clean = text.strip()
         selected_file = None
@@ -237,9 +236,9 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
                 else:
                     text = "what is this document all about ?"
                     
-                prepend_msg = f"✅ **{active_file}** selected. \n\n"
+                prepend_msg = f"**{active_file}** selected. \n\n"
 
-    # Run intelligent routing if not a selection retry
+    # route query
     if not is_selection_retry and all_files:
         intent = await wa_bot.llm_service.analyze_query(text, history)
         standalone_query = intent.get("standalone_query", text)
@@ -278,8 +277,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
             return
 
     print(f"--- [WHATSAPP TEXT ROUTE] Starting LLM ask() generator... ---")
-    # Process RAG Query via bot
-    # Note: bot.ask returns an AsyncIterable[str]. We accumulate the chunks.
+    # query bot
     response_chunks = []
     if prepend_msg:
         response_chunks.append(prepend_msg)
@@ -309,13 +307,13 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
     t_llm_done = time.perf_counter()
     print(f"--- [WHATSAPP TEXT ROUTE] LLM Answer generated! Time taken: {t_llm_done - t_llm_start:.4f}s ---")
 
-    # Save both turns atomically in a single disk write
+    # save state
     await wa_service.add_conversation_turn(phone_number, text, full_response)
     
-    # Sync memory state
+    # sync memory
     session.memory = wa_service.get_user_history(phone_number)
 
-    # Send response — split if > 4096 chars (WhatsApp limit)
+    # send response
     chunk_size = 4000
     t_send_start = time.perf_counter()
     for i in range(0, len(full_response), chunk_size):

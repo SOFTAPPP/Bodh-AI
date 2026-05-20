@@ -19,7 +19,7 @@ class VectorService:
     - 384-dim vectors → compact FAISS index, fast ANN search
     """
 
-    # Class-level cache for the shared embedding model to save memory and warm up instantly
+    # cache model
     _shared_embeddings = None
     _shared_lock = threading.Lock()
 
@@ -85,7 +85,7 @@ class VectorService:
         """Batch-adds documents to FAISS; creates store if it doesn't exist."""
         print(f"--- VectorService: Embedding & indexing {len(documents)} chunks ---")
         
-        # Ensure we try to load existing index before creating a new one
+        # load index
         if self.vector_store is None and not self._index_attempted:
             self._index_attempted = True
             self.load_index()
@@ -119,8 +119,7 @@ class VectorService:
 
         Returns filtered docs sorted by relevance.
         """
-        # Always reload index from disk before searching to guarantee real-time synchronization
-        # across all concurrent API and webhook requests.
+        # reload index
         self.load_index()
 
         if not self.vector_store:
@@ -128,12 +127,11 @@ class VectorService:
 
         try:
             if embedding is not None:
-                # Correct method name in langchain-community FAISS wrapper
-                # (similarity_search_by_vector_with_score does NOT exist — this was a bug)
+                # similarity search
                 results_with_scores = self.vector_store.similarity_search_with_score_by_vector(
                     embedding, k=k, filter=filter_dict
                 )
-                # Scores from FAISS are L2 distances; convert to cosine similarity proxy
+                # get score
                 scored = [
                     (doc, max(0.0, 1.0 - (score / 2.0)))
                     for doc, score in results_with_scores
@@ -148,16 +146,14 @@ class VectorService:
                 if score >= similarity_threshold
             ]
 
-            # Active file filtering: if active_file is set, ONLY return chunks from that file.
-            # This is strict (not just boosting) — the user explicitly selected this file.
+            # filter active_file
             if active_file:
                 af_lower = active_file.lower()
                 active_docs = [d for d in filtered if d.metadata.get("source_file", "").lower() == af_lower]
                 if active_docs:
                     filtered = active_docs[:k]
                 else:
-                    # No chunks from active file passed threshold — return empty so
-                    # the caller can do a zero-threshold retry scoped to this file.
+                    # handle fallback
                     filtered = []
 
             print(f"--- VectorService: Retrieved {len(scored)} chunks, "
@@ -166,8 +162,7 @@ class VectorService:
             if filtered:
                 return filtered
 
-            # Final fallback (threshold=0.0 path or no active_file): top-N by score
-            # Still respect active_file to avoid cross-contamination
+            # fallback top_n
             if active_file:
                 af_lower = active_file.lower()
                 af_scored = [(doc, s) for doc, s in scored if doc.metadata.get("source_file", "").lower() == af_lower]

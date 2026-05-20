@@ -24,7 +24,7 @@ class PDFChatBot:
 
         self.llm_service = LLMService()
 
-        # Each platform only initializes its own services
+
         if platform == "whatsapp":
             self.doc_service = DocumentService(
                 upload_dir=Config.WA_UPLOAD_DIR,
@@ -38,10 +38,9 @@ class PDFChatBot:
             )
             self.vector_service = VectorService(store_dir=Config.VECTOR_STORE_DIR)
 
-        # Per-domain query cache: {domain: [{\"embedding\": [...], \"answer\": \"...\"}]}
+        # query cache
         self._query_caches: Dict[str, List[Dict]] = {}
         self._cache_threshold = Config.CACHE_SIMILARITY_THRESHOLD
-        self._cache_max = 256  # evict oldest when exceeded per domain
 
     def get_indexed_files(self) -> List[str]:
         """Returns this platform's indexed files as a sorted list. No cross-platform leakage."""
@@ -63,7 +62,7 @@ class PDFChatBot:
         import re
         t0 = time.perf_counter()
 
-        # Fast-path for simple chitchat/greetings/acknowledgements
+        # handle chitchat
         q = query.lower().strip().strip("?").strip("!").strip(".")
         chitchat_phrases = {
             "hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening",
@@ -80,14 +79,14 @@ class PDFChatBot:
                 yield chunk
             return
 
-        # Check if platform has indexed files
+        # check files
         platform_files = self.get_indexed_files()
 
         if not platform_files:
             yield "No files are currently available in the database. Please upload a document first."
             return
 
-        # Run query analysis and embedding generation
+        # analyze query
         if niche_hint:
             standalone_query = query
             intent = {
@@ -110,10 +109,10 @@ class PDFChatBot:
         t_embed = time.perf_counter()
         print(f"--- [PERF] Classify + Embed: {t_embed - t0:.4f}s ---")
 
-        # Run multi-document routing layer
+        # route query
         auto_switch_message = ""
         
-        # Skip routing if user manually selected a file
+
         if not is_selection_retry:
             route_res = await self.route_query(standalone_query, platform_files)
             best_doc = route_res["best_doc"]
@@ -139,7 +138,7 @@ class PDFChatBot:
         else:
             route_res = await self.route_query(standalone_query, platform_files)
 
-        # Retrieve relevant chunks and construct context
+        # retrieve context
         if active_file:
             matched_file = None
             for f in platform_files:
@@ -148,7 +147,7 @@ class PDFChatBot:
                     break
             active_file = matched_file or active_file
 
-        # Sync the session active document and load its isolated index
+        # sync session
         session = SessionManager.switch_document(
             platform=self.platform,
             session_id=session_id,
@@ -156,7 +155,7 @@ class PDFChatBot:
             bot_instance=self
         )
 
-        # Context debug logging
+        # debug logs
         print({
             "active_document": session.active_document,
             "index_path": session.faiss_index_path,
@@ -175,8 +174,7 @@ class PDFChatBot:
             yield cached_answer
             return
 
-        # Disable HyDE and threshold filtering for structural, ordinal, or number-specific queries
-        # to avoid hallucinated direction and prevent filtering correct chunks.
+        # skip hyde
         is_ordinal_query = any(
             word in standalone_query.lower()
             for word in ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th",
@@ -198,7 +196,7 @@ class PDFChatBot:
             print("--- [RAG] Ordinal/structural query detected. Setting similarity threshold to 0.0 to prevent filtering correct chunks. ---")
             similarity_threshold = 0.0
 
-        # Run query through the isolated QA Chain
+        # query chain
         t_search_start = time.perf_counter()
         docs = []
         context_text = ""
@@ -219,7 +217,7 @@ class PDFChatBot:
         print(f"--- [PERF] Vector Search: {t_search - t_search_start:.4f}s | "
               f"{len(docs)} chunks [domain={domain}, threshold={similarity_threshold}] ---")
 
-        # ── Fallback when no docs pass threshold for the active file ────────────
+        # fallback query
         if not docs and active_file:
             print(f"--- [FALLBACK] No docs above threshold for '{active_file}'. Retrying with 0.0 threshold... ---")
             if session.qa_chain:
@@ -228,12 +226,12 @@ class PDFChatBot:
                     embedding=search_embedding,
                     history=history,
                     domain=domain,
-                    similarity_threshold=-1.0,  # Zero-threshold fallback retry
+                    similarity_threshold=-1.0,  # retry fallback
                     active_file=active_file,
                     response_intent=response_intent
                 )
 
-        # Helper function for generating fallback suggestions
+        # generate fallback
         def get_fallback_suggestion_message(current_file: str) -> str:
             other_files = [f for f in platform_files if f.lower() != current_file.lower()]
             
@@ -283,7 +281,7 @@ class PDFChatBot:
         if full_response:
             self._cache_store(query_embedding, full_response, domain, active_file)
 
-        # ── Append selection prompt if information not found and other options exist ──
+        # append prompt
         if "This information was not found in the selected document" in full_response:
             append_msg = get_fallback_suggestion_message(active_file)
             suggestion_only = append_msg.replace("This information was not found in the selected document.", "").strip()
@@ -296,25 +294,25 @@ class PDFChatBot:
             filename = os.path.basename(file_path).lower()
             clean_doc = "".join(c for c in filename if c.isalnum() or c in (".", "_", "-")).lower()
             
-            # Destination path: data/indexes/<session_id>/<doc_name>/
+
             dest_dir = os.path.join(Config.DATA_DIR, "indexes", session_id, clean_doc)
             os.makedirs(dest_dir, exist_ok=True)
             
             loop = asyncio.get_event_loop()
             chunks = await loop.run_in_executor(None, self.doc_service.process_pdf, file_path)
             
-            # Create isolated VectorService for this directory and add documents
+            # index doc
             session_vector_service = VectorService(store_dir=dest_dir)
             await loop.run_in_executor(None, session_vector_service.add_documents, chunks)
             
             self.doc_service.mark_as_indexed(filename)
             print(f"--- Indexed {len(chunks)} chunks from {filename} into {dest_dir} ---")
             
-            # Generate and save document-level metadata for intelligent routing
+            # save metadata
             if chunks:
                 await self.generate_and_save_metadata(filename, chunks)
             
-            # If session_id is not default, also save a copy to the default path for future sessions
+            # cache copy
             if session_id != "default":
                 default_dir = os.path.join(Config.DATA_DIR, "indexes", "default", clean_doc)
                 os.makedirs(default_dir, exist_ok=True)
@@ -335,7 +333,7 @@ class PDFChatBot:
             text_sample = "\n\n".join([chunk.page_content for chunk in chunks[:3]])
             metadata = await self.llm_service.generate_document_metadata(filename, text_sample)
             
-            # Generate embeddings
+            # embed query
             filename_no_ext = filename.replace(".pdf", "")
             filename_embedding = await self.vector_service.aembed_query(filename_no_ext)
             summary_embedding = await self.vector_service.aembed_query(metadata["summary"])
@@ -394,7 +392,7 @@ class PDFChatBot:
             upload_dir = self.doc_service.upload_dir
             file_path = os.path.join(upload_dir, filename)
             if not os.path.exists(file_path):
-                # case-insensitive check
+                # check match
                 for f in os.listdir(upload_dir):
                     if f.lower() == filename.lower():
                         file_path = os.path.join(upload_dir, f)
@@ -447,10 +445,10 @@ class PDFChatBot:
             sim_summary = float(np.dot(query_embedding, doc_meta["summary_embedding"]))
             sim_keywords = float(np.dot(query_embedding, doc_meta["keywords_embedding"]))
             
-            # Combine similarities (using the max for clean semantic matches)
+            # combine similarity
             base_score = max(sim_filename, sim_summary, sim_keywords)
             
-            # Substring and word boost to handle exact keywords (e.g. specific names/tags)
+            # keyword boost
             filename_no_ext = filename.lower().replace(".pdf", "")
             heuristic_boost = 0.0
             
@@ -485,13 +483,13 @@ class PDFChatBot:
             second_doc, second_score = sorted_docs[1]
             diff = best_score - second_score
             
-            # High confidence: clear winner
+            # high confidence
             if best_score >= 0.45 and diff >= 0.12:
                 confidence = "HIGH"
-            # Ambiguity: multiple close matches
+            # ambiguous query
             elif best_score >= 0.30 and diff < 0.12:
                 confidence = "MEDIUM"
-            # Medium-high score with moderate lead
+            # medium confidence
             elif best_score >= 0.35 and diff >= 0.10:
                 confidence = "HIGH"
             elif best_score >= 0.25:

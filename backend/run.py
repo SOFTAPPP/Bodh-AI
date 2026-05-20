@@ -2,7 +2,7 @@ import uvicorn
 import os
 import sys
 
-# Bootstrap environment: Ensure the backend directory is in sys.path and is the working directory
+# bootstrap env
 backend_dir = os.path.dirname(os.path.abspath(__file__))
 
 if backend_dir not in sys.path:

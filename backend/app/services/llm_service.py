@@ -30,7 +30,7 @@ class LLMService:
         self.reasoning_llm  = ChatGroq(model_name=Config.REASONING_MODEL,  **common)
         self.fallback_llm   = ChatGroq(model_name=Config.FALLBACK_MODEL,   **common)
 
-        # Non-streaming LLM for HyDE generation (faster without streaming overhead)
+        # setup llm
         hyde_common = dict(
             groq_api_key=Config.GROQ_API_KEY,
             temperature=0,
@@ -78,7 +78,7 @@ class LLMService:
 
         Skips the LLM entirely for single-turn queries — uses heuristics instead.
         """
-        # Fast-path: classify via heuristics if there is no conversation history
+        # quick classify
         if not history:
             return self._heuristic_classify(query)
 
@@ -96,7 +96,7 @@ class LLMService:
         human_msg = f"PREV: {last['content'][:100]}\nQ: {query}"
 
         try:
-            # Use fallback model for fast query analysis
+            # query analyzer
             resp = await self.fallback_llm.ainvoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=human_msg)],
                 config={"max_tokens": 120},
@@ -145,7 +145,7 @@ class LLMService:
 
         protocols = {
             "legal": (
-                "⚖️ SUPREME FORENSIC ANALYST — Legal Document Intelligence\n\n"
+                "SUPREME FORENSIC ANALYST — Legal Document Intelligence\n\n"
                 "You are a Lead Digital Forensics Expert specializing in legal document analysis.\n\n"
                 "RESPONSE STRUCTURE:\n"
                 "1. STATUTE & PROVISION: Identify the specific legal provisions, sections, or clauses involved.\n"
@@ -156,7 +156,7 @@ class LLMService:
                 "STYLE: Cite exact document sections. Use tables for multi-party comparisons. Bold critical legal terms."
             ),
             "medical": (
-                "🏥 CLINICAL SPECIALIST — Medical Document Intelligence\n\n"
+                "CLINICAL SPECIALIST — Medical Document Intelligence\n\n"
                 "You are a Medical Informatics Lead specializing in clinical document analysis.\n\n"
                 "RESPONSE STRUCTURE:\n"
                 "1. CLINICAL PRESENTATION: Extract symptoms, vital signs, and presenting complaints.\n"
@@ -164,10 +164,10 @@ class LLMService:
                 "3. TREATMENT PATHWAY: Document medications, procedures, and interventions with dosages.\n"
                 "4. CLINICAL SIGNIFICANCE: Explain what the findings mean in clinical context.\n"
                 "5. PROGNOSTIC INDICATORS: Note any risk factors or outcome predictors.\n\n"
-                "STYLE: Use precise medical terminology. Bold critical values. Flag abnormal findings with ⚠️."
+                "STYLE: Use precise medical terminology. Bold critical values. Flag abnormal findings."
             ),
             "hr": (
-                "👤 EXECUTIVE RECRUITER — Resume/CV Intelligence\n\n"
+                "EXECUTIVE RECRUITER — Resume/CV Intelligence\n\n"
                 "You are a Talent Strategy Analyst specializing in candidate evaluation.\n\n"
                 "ASSUMPTION RULE: You must assume that all experiences, projects, skills, certifications, and achievements "
                 "listed in the resume belong to the candidate (whose name is at the top of the resume), unless explicitly stated otherwise.\n\n"
@@ -180,7 +180,7 @@ class LLMService:
                 "STYLE: Use bullet points for skills. Bold quantifiable achievements. Include a suitability assessment."
             ),
             "financial": (
-                "💰 FORENSIC AUDITOR — Financial Document Intelligence\n\n"
+                "FORENSIC AUDITOR — Financial Document Intelligence\n\n"
                 "You are a Lead Financial Examiner specializing in financial document analysis.\n\n"
                 "RESPONSE STRUCTURE:\n"
                 "1. TRANSACTION SUMMARY: Key financial figures — revenue, expenses, profit margins.\n"
@@ -188,10 +188,10 @@ class LLMService:
                 "3. RECONCILIATION: Compare stated figures against supporting evidence.\n"
                 "4. REGULATORY RISK: Identify compliance issues, reporting gaps, or audit concerns.\n"
                 "5. AUDIT RISK ASSESSMENT: Overall risk rating with specific recommendations.\n\n"
-                "STYLE: Use tables for financial comparisons. Bold all monetary values. Flag risks with ⚠️."
+                "STYLE: Use tables for financial comparisons. Bold all monetary values. Flag risks."
             ),
             "academic": (
-                "🎓 SCHOLARLY REVIEWER — Academic Document Intelligence\n\n"
+                "SCHOLARLY REVIEWER — Academic Document Intelligence\n\n"
                 "You are a Senior Research Editor specializing in academic paper analysis.\n\n"
                 "RESPONSE STRUCTURE:\n"
                 "1. RESEARCH CONTEXT: Field, research question, hypothesis, and significance.\n"
@@ -202,7 +202,7 @@ class LLMService:
                 "STYLE: Use precise academic language. Bold key statistics. Note limitations transparently."
             ),
             "general": (
-                "🔍 ANALYTICAL INTELLIGENCE — General Document Analysis\n\n"
+                "ANALYTICAL INTELLIGENCE — General Document Analysis\n\n"
                 "You are a high-performance reasoning engine for document intelligence.\n\n"
                 "RESPONSE STRUCTURE:\n"
                 "1. KEY FINDINGS: Extract the most important information from the document.\n"
@@ -264,7 +264,7 @@ class LLMService:
             HumanMessage(content=query),
         ]
 
-        # Try primary model → fallback on error
+        # run model
         for llm, label in [
             (self.generation_llm, Config.GENERATION_MODEL),
             (self.fallback_llm,   Config.FALLBACK_MODEL),
@@ -315,8 +315,7 @@ class LLMService:
             )
         
         messages = [SystemMessage(content=system_content)]
-        for turn in history[-5:]: # Include last few turns for context
-            # Handle if history contains dict objects or standard message dicts
+        for turn in history[-5:]: # trim history
             role = turn.get("role", "user")
             content = turn.get("content", turn.get("message", ""))
             if not content:
@@ -356,14 +355,14 @@ class LLMService:
         try:
             resp = await self.fallback_llm.ainvoke([HumanMessage(content=prompt)], config={"max_tokens": 200})
             content = resp.content.strip()
-            # Clean possible markdown block formatting
+            # clean output
             match = re.search(r"\{.*\}", content, re.DOTALL)
             if match:
                 return json.loads(match.group())
         except Exception as e:
             print(f"--- Error generating document metadata: {e} ---")
         
-        # Fallback metadata if LLM call fails
+        # handle fallback
         return {
             "summary": f"This document contains information related to {filename}.",
             "topics": [filename.replace(".pdf", ""), "document"]

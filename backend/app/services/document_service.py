@@ -47,7 +47,7 @@ class DocumentService:
 
         file_name = os.path.basename(file_path).lower()
 
-        # Detect domain based on first 2000 chars
+        # detect domain
         sample_text = "".join([d.page_content for d in documents[:2]])
         detected_domain = self.get_domain_from_content(sample_text)
 
@@ -63,7 +63,7 @@ class DocumentService:
             chunk.metadata["domain"] = detected_domain
             chunk.metadata["document_id"] = doc_id
             chunk.metadata["upload_timestamp"] = upload_ts
-            # Store domain-specific retrieval config in metadata for vector search
+            # store metadata
             chunk.metadata["top_k"] = domain_cfg["top_k"]
             chunk.metadata["similarity_threshold"] = domain_cfg["similarity_threshold"]
 

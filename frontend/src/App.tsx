@@ -12,7 +12,7 @@ interface Message {
 const NICHE_DEMOS: Record<string, { label: string; icon: string; questions: string[] }> = {
   legal: {
     label: 'Law Firm',
-    icon: '⚖️',
+    icon: '',
     questions: [
       'What are the confidentiality obligations in this contract?',
       'Who are the liable parties and what are the penalties?',
@@ -21,7 +21,7 @@ const NICHE_DEMOS: Record<string, { label: string; icon: string; questions: stri
   },
   medical: {
     label: 'Medical Clinic',
-    icon: '🏥',
+    icon: '',
     questions: [
       "What are the patient's key diagnoses and conditions?",
       'List all prescribed medications and dosages',
@@ -30,7 +30,7 @@ const NICHE_DEMOS: Record<string, { label: string; icon: string; questions: stri
   },
   realestate: {
     label: 'Real Estate',
-    icon: '🏠',
+    icon: '',
     questions: [
       'What properties are available under $3000/month?',
       'List all lease terms and renewal conditions',
@@ -39,7 +39,7 @@ const NICHE_DEMOS: Record<string, { label: string; icon: string; questions: stri
   },
   financial: {
     label: 'Finance / Audit',
-    icon: '💰',
+    icon: '',
     questions: [
       'Identify any financial anomalies or red flags',
       'Summarize total revenue, expenses, and net profit',
@@ -292,7 +292,7 @@ function App() {
       } else {
         console.error('Chat failed:', error);
         setMessages(prev => prev.map(msg =>
-          msg.id === botMsgId ? { ...msg, content: '❌ Sorry, I encountered an error. Please try again.' } : msg
+          msg.id === botMsgId ? { ...msg, content: 'Sorry, I encountered an error. Please try again.' } : msg
         ));
       }
     } finally {
@@ -441,7 +441,7 @@ function App() {
 
       <section className="hero-section hero-gradient">
         <div className="hero-content">
-          <div className="badge animate-fadeIn">🚀 AI Business Automation — Zero Hallucinations</div>
+          <div className="badge animate-fadeIn">AI Business Automation — Zero Hallucinations</div>
           <h1 className="hero-title animate-slideUp">
             Your AI <span>Knowledge</span><br />Employee
           </h1>
@@ -464,7 +464,7 @@ function App() {
           <div className="hero-chips animate-slideUp">
             {NICHE_DEMOS[activeNiche].questions.map((q, i) => (
               <div key={i} className="hero-chip" onClick={() => { setView('chat'); setTimeout(() => setInput(q), 200); }}>
-                <span className="chip-icon">💬</span> {q}
+                {q}
               </div>
             ))}
           </div>
@@ -489,7 +489,7 @@ function App() {
               <div className="line long"></div>
               <div className="line short"></div>
             </div>
-            <div className="visual-badge">⚡ Sub-second RAG</div>
+            <div className="visual-badge">Sub-second RAG</div>
           </div>
           <div className="visual-circle animate-pulse-slow"></div>
         </div>
@@ -543,7 +543,7 @@ function App() {
       {showLeadModal && !leadSent && (
         <div className="lead-modal-overlay" onClick={() => setShowLeadModal(false)}>
           <div className="lead-modal" onClick={e => e.stopPropagation()}>
-            <div className="lead-modal-badge">🎯 Interested in this for your business?</div>
+            <div className="lead-modal-badge">Interested in this for your business?</div>
             <h3>Get a Custom Demo</h3>
             <p>Leave your details and we'll build a personalized AI assistant for your workflow.</p>
             <input

@@ -24,33 +24,30 @@ class QAChain:
         active_file: str,
         response_intent: str
     ):
-        # Access the underlying vectorstore from the isolated retriever
+        # get vectorstore
         vectorstore = self.retriever.vectorstore
         k = self.retriever.search_kwargs.get("k", 12)
         
-        # Search with similarity scores (L2 distance squared) using pre-computed vector embedding
+        # search index
         scored_raw = vectorstore.similarity_search_with_score_by_vector(embedding, k=k)
         
-        # Convert L2 distance score to cosine similarity proxy: cosine_similarity ≈ 1.0 - (L2_distance^2 / 2)
-        # Note: Langchain FAISS returns the squared L2 distance as the score.
         scored = [
             (doc, max(0.0, 1.0 - (score / 2.0)))
             for doc, score in scored_raw
         ]
         
-        # Print scored chunks for diagnostic purposes
+        # debug logs
         print(f"--- [RAG SEARCH] Scored chunks for query '{query}': ---")
         for doc, score in scored:
             safe_content = doc.page_content[:60].encode('ascii', errors='replace').decode('ascii').replace('\n', ' ')
             print(f"  - Score: {score:.4f} | File: {doc.metadata.get('source_file')} | Chunk: {doc.metadata.get('chunk_index')} | Content: {safe_content}...")
             
-        # Filter chunks that do not meet the minimum similarity threshold
+        # check threshold
         filtered_docs = [
             doc for doc, score in scored
             if score >= similarity_threshold
         ]
 
-        # strict active file double-check (redundant but safe)
         if active_file:
             af_lower = active_file.lower()
             filtered_docs = [d for d in filtered_docs if d.metadata.get("source_file", "").lower() == af_lower]
@@ -83,7 +80,7 @@ class SessionState:
         self.vector_store = None
         self.retriever = None
         self.qa_chain = None
-        self.memory = []  # Scoped message history
+        self.memory = []  # message history
 
     def unload(self):
         """Explicitly unloads retriever, vector store, and clears memory to prevent leakage."""
@@ -107,7 +104,6 @@ class SessionManager:
     Manages session context, document switching, dynamic on-demand isolated index builds,
     and cross-platform index directory structure configuration.
     """
-    # Schema: {platform: {session_id: SessionState}}
     _instances: Dict[str, Dict[str, SessionState]] = {
         "app": {},
         "whatsapp": {}
@@ -135,18 +131,18 @@ class SessionManager:
         session = cls.get_session(platform, session_id)
         if session.active_document != new_document or session.vector_store is None:
             print(f"--- [DOCUMENT SWITCH TRIGGERED] Platform: {platform} | Session: {session_id} | Document: {new_document} ---")
-            # 1. Purge previous in-memory variables and invoke GC
+            # gc memory
             session.unload()
             
-            # 2. Update active document name
+            # update active_file
             session.active_document = new_document
             
-            # 3. Setup paths and load new vector store, retriever, and qa_chain
+            # load index
             if new_document:
                 clean_doc = "".join(c for c in new_document if c.isalnum() or c in (".", "_", "-")).lower()
                 session.faiss_index_path = os.path.join(Config.DATA_DIR, "indexes", session_id, clean_doc)
                 
-                # 4. Load/build isolated vector store and rebuild chain/retriever
+                # rebuild retriever
                 cls.load_session_vectorstore(session, bot_instance)
                 if session.vector_store:
                     session.retriever = session.vector_store.as_retriever()
@@ -162,7 +158,7 @@ class SessionManager:
             
         index_dir = session.faiss_index_path
         
-        # Case 1: Session-specific index exists
+        # load session_index
         if os.path.exists(index_dir) and os.listdir(index_dir):
             print(f"--- [LOAD INDEX] Loading existing session-specific index from {index_dir} ---")
             session_vector_service = VectorService(store_dir=index_dir)
@@ -170,7 +166,7 @@ class SessionManager:
             session.vector_store = session_vector_service.vector_store
             
         else:
-            # Case 2: Default index exists for this document (pre-indexed/synchronized)
+            # load default_index
             clean_doc = "".join(c for c in session.active_document if c.isalnum() or c in (".", "_", "-")).lower()
             default_index_dir = os.path.join(Config.DATA_DIR, "indexes", "default", clean_doc)
             
@@ -185,13 +181,13 @@ class SessionManager:
                 session.vector_store = session_vector_service.vector_store
                 
             else:
-                # Case 3: Parse and index on-the-fly
+                # index document
                 print(f"--- [BUILD INDEX ON-THE-FLY] Building index for {session.active_document} in session {session.session_id} ---")
                 upload_dir = Config.WA_UPLOAD_DIR if session.platform == "whatsapp" else Config.UPLOAD_DIR
                 pdf_path = os.path.join(upload_dir, session.active_document)
                 
                 if not os.path.exists(pdf_path) and os.path.exists(upload_dir):
-                    # Case-insensitive scan
+                    # check match
                     for f in os.listdir(upload_dir):
                         if f.lower() == session.active_document.lower():
                                 pdf_path = os.path.join(upload_dir, f)
@@ -204,7 +200,7 @@ class SessionManager:
                     session_vector_service.add_documents(chunks)
                     session.vector_store = session_vector_service.vector_store
                     
-                    # Cache a copy under default/ so future sessions can reuse it instantly
+                    # cache index
                     os.makedirs(default_index_dir, exist_ok=True)
                     for f in os.listdir(index_dir):
                         shutil.copy2(os.path.join(index_dir, f), os.path.join(default_index_dir, f))

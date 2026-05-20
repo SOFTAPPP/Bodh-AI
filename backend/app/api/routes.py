@@ -12,7 +12,7 @@ from app.core.config import Config
 router = APIRouter()
 bot = PDFChatBot()
 
-# In-memory analytics store (replace with DB for production)
+# mock db
 _query_log: List[dict] = []
 _leads_store: List[dict] = []
 _sessions: dict = {}
@@ -65,7 +65,7 @@ PRESENTING COMPLAINTS
 Patient presents with chest pain (7/10 severity), shortness of breath on exertion, and fatigue for the past 3 weeks.
 
 VITAL SIGNS
-Blood Pressure: 152/94 mmHg (elevated ⚠️)
+Blood Pressure: 152/94 mmHg (elevated)
 Heart Rate: 88 bpm | Respiratory Rate: 18/min | SpO2: 96% | Temperature: 37.1°C
 
 DIAGNOSES
@@ -83,7 +83,7 @@ TREATMENT PLAN
 Cardiac stress test scheduled for 2024-03-05. Low-sodium diet recommended. 30 min moderate exercise daily. Follow-up in 4 weeks. Refer to cardiologist if stress test abnormal.
 
 LAB RESULTS
-Total Cholesterol: 248 mg/dL ⚠️ | LDL: 162 mg/dL ⚠️ | HDL: 42 mg/dL | Triglycerides: 198 mg/dL ⚠️
+Total Cholesterol: 248 mg/dL | LDL: 162 mg/dL | HDL: 42 mg/dL | Triglycerides: 198 mg/dL
 Blood Glucose (fasting): 108 mg/dL (borderline)
 """,
         "sample_questions": [
@@ -165,7 +165,7 @@ Total Expenses: $3,940,000
 Net Income: $880,000 (18.3% margin)
 
 --- SOURCE: TechCorp_Q4_2023_Financial_Report.pdf | Page 2 ---
-ANOMALIES AND FLAGS IDENTIFIED ⚠️
+ANOMALIES AND FLAGS IDENTIFIED 
 1. Marketing Expense Spike: $380,000 in Q4 vs $140,000 average in Q1-Q3. No supporting campaign invoices provided.
 2. Unreconciled Transaction: $47,500 wire transfer on Nov 14 to vendor "Global Supplies Ltd" — no PO or contract on file.
 3. Accounts Receivable: $320,000 outstanding > 90 days from 3 clients. Risk of write-off.
@@ -219,7 +219,7 @@ async def upload_pdf(
 
     indexed_files = bot.doc_service.get_indexed_files()
     if file.filename.lower() in indexed_files:
-        # Even if already indexed globally, register and switch document for this session
+        # switch doc
         if session_id:
             if session_id not in _sessions:
                 _sessions[session_id] = {"active_file": None}
@@ -237,7 +237,7 @@ async def upload_pdf(
     session_id_val = session_id or "default"
     await bot.process_new_pdf(upload_path, session_id=session_id_val)
     
-    # Auto-switch active document for the session
+    # switch doc
     if session_id:
         if session_id not in _sessions:
             _sessions[session_id] = {"active_file": None}
@@ -267,7 +267,7 @@ async def chat(request: ChatRequest):
     t_start = time.perf_counter()
     print(f"=== [WEB APP /CHAT START] Time: {datetime.utcnow().isoformat()} | Query: {request.message} ===")
 
-    # Fast-path for simple chitchat/greetings
+    # handle chitchat
     q = request.message.lower().strip().strip("?").strip("!").strip(".")
     chitchat_phrases = {
         "hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening",
@@ -288,7 +288,7 @@ async def chat(request: ChatRequest):
             print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
         return StreamingResponse(chitchat_stream(), media_type="text/plain")
 
-    # Check if the last assistant message in history was asking to choose another document
+    # check fallback
     last_assistant_msg = ""
     for turn in reversed(request.history):
         if turn.get("role") in ("assistant", "bot"):
@@ -299,7 +299,7 @@ async def chat(request: ChatRequest):
     is_ambiguous_fallback = "Which document are you referring to?" in last_assistant_msg
     is_fallback_selection = is_not_found_fallback or is_ambiguous_fallback
 
-    # Resolve session and active file using ONLY web-platform files (strict isolation)
+    # get session
     session_id = request.session_id or "default"
     if session_id not in _sessions:
         _sessions[session_id] = {"active_file": None}
@@ -309,7 +309,7 @@ async def chat(request: ChatRequest):
     previous_active_file = _sessions[session_id].get("active_file")
     active_file = previous_active_file
 
-    # Sync backend session with frontend chosen active_file (if user switched files via UI)
+    # sync session
     if request.active_file and request.active_file.lower() != (previous_active_file or "").lower():
         if any(f.lower() == request.active_file.lower() for f in all_files):
             active_file = next(f for f in all_files if f.lower() == request.active_file.lower())
@@ -343,7 +343,7 @@ async def chat(request: ChatRequest):
     prepend_msg = ""
     is_selection_retry = False
     
-    # Check if user is responding to a document selection prompt
+    # check selection
     if is_fallback_selection and target_list:
         text_clean = request.message.strip()
         selected_file = None
@@ -392,9 +392,8 @@ async def chat(request: ChatRequest):
                     request.message = "what is this document all about ?"
 
 
-    # Run intelligent routing if not a selection retry
-    if not is_selection_retry and all_files:
-        # Get standalone query and intent
+    # route query
+        # get query
         if request.niche:
             standalone_query = request.message
         else:
@@ -433,7 +432,7 @@ async def chat(request: ChatRequest):
                     
 
 
-    # Log query analytics
+    # log analytics
     _query_log.append({
         "ts": datetime.utcnow().isoformat(),
         "niche": request.niche or "auto",
@@ -441,7 +440,7 @@ async def chat(request: ChatRequest):
         "demo": False,
     })
     
-    # Clear chat history if user switched documents to avoid context leakage
+    # clear history
     effective_history = request.history
     if active_file and previous_active_file and active_file.lower() != previous_active_file.lower():
         print(f"--- [SESSION] Active document changed from {previous_active_file} to {active_file}. Clearing history context. ---")
@@ -465,11 +464,9 @@ async def chat(request: ChatRequest):
                 first = False
             yield chunk
         print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
-        # Sync memory state
+        # sync memory
         session.memory = effective_history
 
-    # Determine the effective active_file for the response header
-    # (includes auto-selected single-doc case handled inside bot.ask())
     effective_file = active_file
     if not effective_file and len(all_files) == 1:
         effective_file = all_files[0]
@@ -508,7 +505,7 @@ async def capture_lead(lead: LeadRequest):
     }
     _leads_store.append(entry)
 
-    # Also persist to a JSON file so leads survive server restart
+    # save leads
     leads_file = os.path.join(Config.DATA_DIR, "leads.json")
     try:
         existing = []

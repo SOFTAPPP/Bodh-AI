@@ -7,7 +7,7 @@ from app.api.whatsapp_routes import router as wa_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm up embeddings in the background to avoid blocking startup
+    # warmup embeddings
     from app.api.routes import bot
     asyncio.create_task(asyncio.to_thread(bot.vector_service.warmup))
     yield
@@ -21,7 +21,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
