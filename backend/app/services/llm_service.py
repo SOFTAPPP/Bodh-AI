@@ -99,7 +99,7 @@ class LLMService:
             '{"standalone_query": "...", "domain": "legal|medical|hr|financial|academic|general", '
             '"intent": "fact_extraction|complex_analysis"}\n\n'
             "RULES:\n"
-            "1. standalone_query: incorporate conversation context so it can be searched alone.\n"
+            "1. standalone_query: MUST be a self-contained search query. Replace pronouns (it, this, he) with the subject from PREV. If Q asks for a general summary (e.g., 'What is this about?'), output 'Summarize the document'. NEVER output meta-commands like 'context reset'.\n"
             "2. intent: fact_extraction = simple lookup; complex_analysis = reasoning/comparison/why/how.\n"
             "3. domain: primary subject of the query."
         )
@@ -115,7 +115,11 @@ class LLMService:
             )
             match = re.search(r"\{.*\}", str(resp.content), re.DOTALL)
             if match:
-                return json.loads(match.group())
+                res = json.loads(match.group())
+                sq = res.get("standalone_query", "").lower().strip()
+                if not sq or sq in ["context reset", "reset", "none", "n/a", "null"]:
+                    res["standalone_query"] = query
+                return res
         except Exception as e:
             print(f"--- analyze_query error: {e}. Using heuristics. ---")
 
