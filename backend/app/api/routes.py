@@ -397,6 +397,7 @@ async def chat(request: ChatRequest):
 
 
     # route query
+    if not is_selection_retry and all_files:
         # get query
         if request.niche:
             standalone_query = request.message
