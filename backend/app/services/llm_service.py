@@ -8,7 +8,6 @@ from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
 from pydantic import SecretStr
 from app.core.config import Config
 
-
 class LLMService:
     """
     Groq-powered LLM service with:
@@ -22,7 +21,7 @@ class LLMService:
     """
     def __init__(self):
         groq_api_key = SecretStr(Config.GROQ_API_KEY) if Config.GROQ_API_KEY else None
-        
+
         self.generation_llm = ChatGroq(
             model=Config.GENERATION_MODEL,
             api_key=groq_api_key,
@@ -42,7 +41,6 @@ class LLMService:
             streaming=True
         )
 
-        # setup llm
         self.hyde_llm = ChatGroq(
             model=Config.HYDE_MODEL,
             api_key=groq_api_key,
@@ -90,7 +88,7 @@ class LLMService:
 
         Skips the LLM entirely for single-turn queries — uses heuristics instead.
         """
-        # quick classify
+
         if not history:
             return self._heuristic_classify(query)
 
@@ -108,7 +106,7 @@ class LLMService:
         human_msg = f"PREV: {last['content'][:100]}\nQ: {query}"
 
         try:
-            # query analyzer
+
             resp = await self.fallback_llm.ainvoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=human_msg)],
                 max_tokens=120,
@@ -280,7 +278,6 @@ class LLMService:
             HumanMessage(content=query),
         ]
 
-        # run model
         for llm, label in [
             (self.generation_llm, Config.GENERATION_MODEL),
             (self.fallback_llm,   Config.FALLBACK_MODEL),
@@ -332,9 +329,9 @@ class LLMService:
                 "CRITICAL: A document has ALREADY been uploaded and is active. DO NOT ask the user to upload a document. "
                 "Simply reply to their comment or greeting naturally, and if appropriate, let them know you are ready to answer any questions they have about their active document."
             )
-        
+
         messages: List[BaseMessage] = [SystemMessage(content=system_content)]
-        for turn in history[-5:]: # trim history
+        for turn in history[-5:]:
             role = turn.get("role", "user")
             content = turn.get("content", turn.get("message", ""))
             if not content:
@@ -343,9 +340,9 @@ class LLMService:
                 messages.append(HumanMessage(content=content))
             elif role == "assistant":
                 messages.append(SystemMessage(content=content))
-                
+
         messages.append(HumanMessage(content=query))
-        
+
         for llm, label in [
             (self.generation_llm, Config.GENERATION_MODEL),
             (self.fallback_llm,   Config.FALLBACK_MODEL),
@@ -377,14 +374,13 @@ class LLMService:
         try:
             resp = await self.fallback_llm.ainvoke([HumanMessage(content=prompt)], max_tokens=200)
             content = str(resp.content).strip()
-            # clean output
+
             match = re.search(r"\{.*\}", content, re.DOTALL)
             if match:
                 return json.loads(match.group())
         except Exception as e:
             print(f"--- Error generating document metadata: {e} ---")
-        
-        # handle fallback
+
         return {
             "summary": f"This document contains information related to {filename}.",
             "topics": [filename.replace(".pdf", ""), "document"]

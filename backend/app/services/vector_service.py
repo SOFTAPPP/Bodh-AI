@@ -5,7 +5,6 @@ from typing import List, Optional
 from langchain_community.vectorstores import FAISS
 from app.core.config import Config
 
-
 class VectorService:
     """
     FAISS vector store with local HuggingFace embeddings.
@@ -19,7 +18,6 @@ class VectorService:
     - 384-dim vectors → compact FAISS index, fast ANN search
     """
 
-    # cache model
     _shared_embeddings = None
     _shared_lock = threading.Lock()
 
@@ -65,7 +63,6 @@ class VectorService:
                 self.clear_all_data()
         return False
 
-
     def clear_all_data(self):
         """Wipes this instance's vector store for a clean rebuild."""
         import shutil
@@ -84,8 +81,7 @@ class VectorService:
     def add_documents(self, documents: list):
         """Batch-adds documents to FAISS; creates store if it doesn't exist."""
         print(f"--- VectorService: Embedding & indexing {len(documents)} chunks ---")
-        
-        # load index
+
         if self.vector_store is None and not self._index_attempted:
             self._index_attempted = True
             self.load_index()
@@ -119,7 +115,7 @@ class VectorService:
 
         Returns filtered docs sorted by relevance.
         """
-        # reload index
+
         self.load_index()
 
         if not self.vector_store:
@@ -127,11 +123,11 @@ class VectorService:
 
         try:
             if embedding is not None:
-                # similarity search
+
                 results_with_scores = self.vector_store.similarity_search_with_score_by_vector(
                     embedding, k=k, filter=filter_dict
                 )
-                # get score
+
                 scored = [
                     (doc, max(0.0, 1.0 - (score / 2.0)))
                     for doc, score in results_with_scores
@@ -146,14 +142,13 @@ class VectorService:
                 if score >= similarity_threshold
             ]
 
-            # filter active_file
             if active_file:
                 af_lower = active_file.lower()
                 active_docs = [d for d in filtered if d.metadata.get("source_file", "").lower() == af_lower]
                 if active_docs:
                     filtered = active_docs[:k]
                 else:
-                    # handle fallback
+
                     filtered = []
 
             print(f"--- VectorService: Retrieved {len(scored)} chunks, "
@@ -162,14 +157,12 @@ class VectorService:
             if filtered:
                 return filtered
 
-            # fallback top_n
             if active_file:
                 af_lower = active_file.lower()
                 af_scored = [(doc, s) for doc, s in scored if doc.metadata.get("source_file", "").lower() == af_lower]
                 if af_scored:
                     return [doc for doc, _ in af_scored[:k]]
             return [doc for doc, _ in scored[:3]]
-
 
         except Exception as e:
             print(f"--- VectorService search error: {e}. Falling back to basic search. ---")

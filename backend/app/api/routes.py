@@ -12,7 +12,6 @@ from app.core.config import Config
 router = APIRouter()
 bot = PDFChatBot()
 
-# mock db
 _query_log: List[dict] = []
 _leads_store: List[dict] = []
 _sessions: dict = {}
@@ -165,7 +164,7 @@ Total Expenses: $3,940,000
 Net Income: $880,000 (18.3% margin)
 
 --- SOURCE: TechCorp_Q4_2023_Financial_Report.pdf | Page 2 ---
-ANOMALIES AND FLAGS IDENTIFIED 
+ANOMALIES AND FLAGS IDENTIFIED
 1. Marketing Expense Spike: $380,000 in Q4 vs $140,000 average in Q1-Q3. No supporting campaign invoices provided.
 2. Unreconciled Transaction: $47,500 wire transfer on Nov 14 to vendor "Global Supplies Ltd" — no PO or contract on file.
 3. Accounts Receivable: $320,000 outstanding > 90 days from 3 clients. Risk of write-off.
@@ -186,7 +185,6 @@ Overall risk rating: MEDIUM. Immediate clarification required on marketing spend
     },
 }
 
-
 class ChatRequest(BaseModel):
     message: str
     history: List[dict] = []
@@ -194,7 +192,6 @@ class ChatRequest(BaseModel):
     niche: Optional[str] = None
     demo_mode: Optional[bool] = False
     session_id: Optional[str] = None
-
 
 class LeadRequest(BaseModel):
     name: str
@@ -206,7 +203,7 @@ from fastapi import Form
 
 @router.post("/upload")
 async def upload_pdf(
-    background_tasks: BackgroundTasks, 
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None)
 ):
@@ -223,7 +220,7 @@ async def upload_pdf(
 
     indexed_files = bot.doc_service.get_indexed_files()
     if filename.lower() in indexed_files:
-        # switch doc
+
         if session_id:
             if session_id not in _sessions:
                 _sessions[session_id] = {"active_file": None}
@@ -240,8 +237,7 @@ async def upload_pdf(
 
     session_id_val = session_id or "default"
     await bot.process_new_pdf(upload_path, session_id=session_id_val)
-    
-    # switch doc
+
     if session_id:
         if session_id not in _sessions:
             _sessions[session_id] = {"active_file": None}
@@ -257,12 +253,10 @@ async def upload_pdf(
     return {"filename": filename.lower(), "status": "ready",
             "message": f"'{filename}' has been fully indexed and is now active! You can start asking questions about it."}
 
-
 @router.get("/files")
 async def get_files():
     """Returns only web-platform indexed documents. WhatsApp files are strictly isolated."""
     return {"files": bot.get_indexed_files()}
-
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
@@ -271,7 +265,6 @@ async def chat(request: ChatRequest):
     t_start = time.perf_counter()
     print(f"=== [WEB APP /CHAT START] Time: {datetime.utcnow().isoformat()} | Query: {request.message} ===")
 
-    # handle chitchat
     q = request.message.lower().strip().strip("?").strip("!").strip(".")
     chitchat_phrases = {
         "hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening",
@@ -292,7 +285,6 @@ async def chat(request: ChatRequest):
             print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
         return StreamingResponse(chitchat_stream(), media_type="text/plain")
 
-    # check fallback
     last_assistant_msg = ""
     for turn in reversed(request.history):
         if turn.get("role") in ("assistant", "bot"):
@@ -303,17 +295,15 @@ async def chat(request: ChatRequest):
     is_ambiguous_fallback = "Which document are you referring to?" in last_assistant_msg
     is_fallback_selection = is_not_found_fallback or is_ambiguous_fallback
 
-    # get session
     session_id = request.session_id or "default"
     if session_id not in _sessions:
         _sessions[session_id] = {"active_file": None}
 
-    all_files = bot.get_indexed_files()  # web-only
+    all_files = bot.get_indexed_files()
 
     previous_active_file = _sessions[session_id].get("active_file")
     active_file = previous_active_file
 
-    # sync session
     if request.active_file and request.active_file.lower() != (previous_active_file or "").lower():
         if any(f.lower() == request.active_file.lower() for f in all_files):
             active_file = next(f for f in all_files if f.lower() == request.active_file.lower())
@@ -333,7 +323,7 @@ async def chat(request: ChatRequest):
             target_list = [f for f in all_files if f.lower() != active_file.lower()]
         else:
             target_list = all_files
-        active_file = None  # Clear to force resolution
+        active_file = None
         _sessions[session_id]["active_file"] = None
         SessionManager.switch_document(
             platform="app",
@@ -343,15 +333,14 @@ async def chat(request: ChatRequest):
         )
     else:
         target_list = all_files
-        
+
     prepend_msg = ""
     is_selection_retry = False
-    
-    # check selection
+
     if is_fallback_selection and target_list:
         text_clean = request.message.strip()
         selected_file = None
-        
+
         if text_clean.isdigit():
             idx = int(text_clean) - 1
             if 0 <= idx < len(target_list):
@@ -362,7 +351,7 @@ async def chat(request: ChatRequest):
             if len(matches) == 1:
                 selected_file = matches[0]
                 is_selection_retry = True
-            
+
             if not selected_file and len(target_list) > 1:
                 q_words = set(text_clean.lower().split())
                 for f in target_list:
@@ -371,7 +360,7 @@ async def chat(request: ChatRequest):
                     if any(w in f_name_lower for w in q_words if len(w) > 3) or text_clean.lower() in f_name_no_ext:
                         selected_file = f
                         break
-                        
+
         if selected_file:
             active_file = selected_file
             _sessions[session_id]["active_file"] = active_file
@@ -381,7 +370,7 @@ async def chat(request: ChatRequest):
                 new_document=active_file,
                 bot_instance=bot
             )
-            
+
             if is_selection_retry:
                 original_query = None
                 for turn in reversed(request.history):
@@ -395,20 +384,18 @@ async def chat(request: ChatRequest):
                 else:
                     request.message = "what is this document all about ?"
 
-
-    # route query
     if not is_selection_retry and all_files:
-        # get query
+
         if request.niche:
             standalone_query = request.message
         else:
             intent = await bot.llm_service.analyze_query(request.message, request.history)
             standalone_query = intent.get("standalone_query", request.message)
-            
+
         route_res = await bot.route_query(standalone_query, all_files)
         confidence = route_res["confidence"]
         best_doc = route_res["best_doc"]
-        
+
         if confidence == "HIGH":
             if not active_file or active_file.lower() != best_doc.lower():
                 print(f"--- [ROUTE SYNCHRONIZER] Auto-switching from {active_file} to {best_doc} ---")
@@ -434,18 +421,14 @@ async def chat(request: ChatRequest):
                 bot_instance=bot
             )
             return StreamingResponse(iter([msg]), media_type="text/plain")
-                    
 
-
-    # log analytics
     _query_log.append({
         "ts": datetime.utcnow().isoformat(),
         "niche": request.niche or "auto",
         "query": request.message,
         "demo": False,
     })
-    
-    # clear history
+
     effective_history = request.history
     if active_file and previous_active_file and active_file.lower() != previous_active_file.lower():
         print(f"--- [SESSION] Active document changed from {previous_active_file} to {active_file}. Clearing history context. ---")
@@ -469,7 +452,7 @@ async def chat(request: ChatRequest):
                 first = False
             yield chunk
         print(f"=== [WEB APP /CHAT END] Total Time: {time.perf_counter() - t_start:.4f}s ===")
-        # sync memory
+
         session.memory = effective_history
 
     effective_file = active_file
@@ -483,7 +466,6 @@ async def chat(request: ChatRequest):
 
     return StreamingResponse(bot_stream(), media_type="text/plain", headers=headers)
 
-
 @router.get("/demo/{niche}")
 async def get_demo_context(niche: str):
     """Returns sample questions and metadata for a given niche demo."""
@@ -495,7 +477,6 @@ async def get_demo_context(niche: str):
         "label": demo["label"],
         "sample_questions": demo["sample_questions"],
     }
-
 
 @router.post("/leads")
 async def capture_lead(lead: LeadRequest):
@@ -510,7 +491,6 @@ async def capture_lead(lead: LeadRequest):
     }
     _leads_store.append(entry)
 
-    # save leads
     leads_file = os.path.join(Config.DATA_DIR, "leads.json")
     try:
         existing = []
@@ -525,7 +505,6 @@ async def capture_lead(lead: LeadRequest):
 
     return {"status": "received", "id": entry["id"], "message": "Thank you! We'll be in touch."}
 
-
 @router.get("/leads")
 async def get_leads():
     """Returns all captured leads (admin use)."""
@@ -534,7 +513,6 @@ async def get_leads():
         with open(leads_file, "r") as f:
             return {"leads": json.load(f), "total": len(json.load(open(leads_file)))}
     return {"leads": _leads_store, "total": len(_leads_store)}
-
 
 @router.get("/analytics")
 async def get_analytics():
@@ -555,7 +533,6 @@ async def get_analytics():
         "by_niche": niche_counts,
         "recent": _query_log[-10:][::-1],
     }
-
 
 @router.post("/sync")
 async def sync():

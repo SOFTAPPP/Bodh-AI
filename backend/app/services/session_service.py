@@ -24,25 +24,22 @@ class QAChain:
         active_file: Optional[str],
         response_intent: str
     ):
-        # get vectorstore
+
         vectorstore = self.retriever.vectorstore
         k = self.retriever.search_kwargs.get("k", 12)
-        
-        # search index
+
         scored_raw = vectorstore.similarity_search_with_score_by_vector(embedding, k=k)
-        
+
         scored = [
             (doc, max(0.0, 1.0 - (score / 2.0)))
             for doc, score in scored_raw
         ]
-        
-        # debug logs
+
         print(f"--- [RAG SEARCH] Scored chunks for query '{query}': ---")
         for doc, score in scored:
             safe_content = doc.page_content[:60].encode('ascii', errors='replace').decode('ascii').replace('\n', ' ')
             print(f"  - Score: {score:.4f} | File: {doc.metadata.get('source_file')} | Chunk: {doc.metadata.get('chunk_index')} | Content: {safe_content}...")
-            
-        # check threshold
+
         filtered_docs = [
             doc for doc, score in scored
             if score >= similarity_threshold
@@ -51,21 +48,21 @@ class QAChain:
         if active_file:
             af_lower = active_file.lower()
             filtered_docs = [d for d in filtered_docs if d.metadata.get("source_file", "").lower() == af_lower]
-        
+
         if not filtered_docs:
             return [], ""
-            
+
         sorted_docs = sorted(
             filtered_docs,
             key=lambda x: (x.metadata.get("source_file", ""), x.metadata.get("chunk_index", 0))
         )
-        
+
         context_text = "\n\n".join(
             f"--- SOURCE: {d.metadata.get('source_file', 'unknown')} | "
             f"Page {d.metadata.get('page', '?')} ---\n{d.page_content}"
             for d in sorted_docs
         )
-        
+
         return sorted_docs, context_text
 
 class SessionState:
@@ -80,7 +77,7 @@ class SessionState:
         self.vector_store: Optional[Any] = None
         self.retriever: Optional[Any] = None
         self.qa_chain: Optional['QAChain'] = None
-        self.memory: List[Any] = []  # message history
+        self.memory: List[Any] = []
 
     def unload(self):
         """Explicitly unloads retriever, vector store, and clears memory to prevent leakage."""
@@ -131,18 +128,15 @@ class SessionManager:
         session = cls.get_session(platform, session_id)
         if session.active_document != new_document or session.vector_store is None:
             print(f"--- [DOCUMENT SWITCH TRIGGERED] Platform: {platform} | Session: {session_id} | Document: {new_document} ---")
-            # gc memory
+
             session.unload()
-            
-            # update active_file
+
             session.active_document = new_document
-            
-            # load index
+
             if new_document:
                 clean_doc = "".join(c for c in new_document if c.isalnum() or c in (".", "_", "-")).lower()
                 session.faiss_index_path = os.path.join(Config.DATA_DIR, "indexes", session_id, clean_doc)
-                
-                # rebuild retriever
+
                 cls.load_session_vectorstore(session, bot_instance)
                 if session.vector_store:
                     session.retriever = session.vector_store.as_retriever()
@@ -155,54 +149,52 @@ class SessionManager:
     def load_session_vectorstore(cls, session: SessionState, bot_instance):
         if not session.active_document:
             return
-            
+
         index_dir = session.faiss_index_path
         if not index_dir:
             return
-        
-        # load session_index
+
         if os.path.exists(index_dir) and os.listdir(index_dir):
             print(f"--- [LOAD INDEX] Loading existing session-specific index from {index_dir} ---")
             session_vector_service = VectorService(store_dir=index_dir)
             session_vector_service.load_index()
             session.vector_store = session_vector_service.vector_store
-            
+
         else:
-            # load default_index
+
             clean_doc = "".join(c for c in session.active_document if c.isalnum() or c in (".", "_", "-")).lower()
             default_index_dir = os.path.join(Config.DATA_DIR, "indexes", "default", clean_doc)
-            
+
             if os.path.exists(default_index_dir) and os.listdir(default_index_dir):
                 print(f"--- [COPY INDEX] Copying default index from {default_index_dir} to {index_dir} ---")
                 os.makedirs(index_dir, exist_ok=True)
                 for f in os.listdir(default_index_dir):
                     shutil.copy2(os.path.join(default_index_dir, f), os.path.join(index_dir, f))
-                
+
                 session_vector_service = VectorService(store_dir=index_dir)
                 session_vector_service.load_index()
                 session.vector_store = session_vector_service.vector_store
-                
+
             else:
-                # index document
+
                 print(f"--- [BUILD INDEX ON-THE-FLY] Building index for {session.active_document} in session {session.session_id} ---")
                 upload_dir = Config.WA_UPLOAD_DIR if session.platform == "whatsapp" else Config.UPLOAD_DIR
                 pdf_path = os.path.join(upload_dir, session.active_document)
-                
+
                 if not os.path.exists(pdf_path) and os.path.exists(upload_dir):
-                    # check match
+
                     for f in os.listdir(upload_dir):
                         if f.lower() == session.active_document.lower():
                                 pdf_path = os.path.join(upload_dir, f)
                                 break
-                               
+
                 if os.path.exists(pdf_path):
                     chunks = bot_instance.doc_service.process_pdf(pdf_path)
                     os.makedirs(index_dir, exist_ok=True)
                     session_vector_service = VectorService(store_dir=index_dir)
                     session_vector_service.add_documents(chunks)
                     session.vector_store = session_vector_service.vector_store
-                    
-                    # cache index
+
                     os.makedirs(default_index_dir, exist_ok=True)
                     for f in os.listdir(index_dir):
                         shutil.copy2(os.path.join(index_dir, f), os.path.join(default_index_dir, f))

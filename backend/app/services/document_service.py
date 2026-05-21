@@ -48,7 +48,6 @@ class DocumentService:
 
         file_name = os.path.basename(file_path).lower()
 
-        # detect domain
         sample_text = "".join([d.page_content for d in documents[:2]])
         detected_domain = self.get_domain_from_content(sample_text)
 
@@ -56,7 +55,7 @@ class DocumentService:
         chunks = text_splitter.split_documents(documents)
 
         domain_cfg = Config.get_domain_config(detected_domain)
-        doc_id = str(uuid.uuid4())  # Unique identifier for this indexing run
+        doc_id = str(uuid.uuid4())
         upload_ts = datetime.now(timezone.utc).isoformat()
         for i, chunk in enumerate(chunks):
             chunk.metadata["chunk_index"] = i
@@ -64,7 +63,7 @@ class DocumentService:
             chunk.metadata["domain"] = detected_domain
             chunk.metadata["document_id"] = doc_id
             chunk.metadata["upload_timestamp"] = upload_ts
-            # store metadata
+
             chunk.metadata["top_k"] = domain_cfg["top_k"]
             chunk.metadata["similarity_threshold"] = domain_cfg["similarity_threshold"]
 
