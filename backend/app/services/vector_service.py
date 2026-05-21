@@ -23,7 +23,7 @@ class VectorService:
     _shared_embeddings = None
     _shared_lock = threading.Lock()
 
-    def __init__(self, store_dir: str = None):
+    def __init__(self, store_dir: Optional[str] = None):
         self._store_dir = store_dir or Config.VECTOR_STORE_DIR
         self.vector_store = None
         self._index_attempted = False

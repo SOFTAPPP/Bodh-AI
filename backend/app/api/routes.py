@@ -210,28 +210,32 @@ async def upload_pdf(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None)
 ):
-    if not file.filename.endswith(".pdf"):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename missing.")
+    filename: str = file.filename
+
+    if not filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
-    upload_path = os.path.join(bot.doc_service.upload_dir, file.filename)
+    upload_path = os.path.join(bot.doc_service.upload_dir, filename)
     with open(upload_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     indexed_files = bot.doc_service.get_indexed_files()
-    if file.filename.lower() in indexed_files:
+    if filename.lower() in indexed_files:
         # switch doc
         if session_id:
             if session_id not in _sessions:
                 _sessions[session_id] = {"active_file": None}
-            _sessions[session_id]["active_file"] = file.filename.lower()
+            _sessions[session_id]["active_file"] = filename.lower()
             from app.services.session_service import SessionManager
             SessionManager.switch_document(
                 platform="app",
                 session_id=session_id,
-                new_document=file.filename.lower(),
+                new_document=filename.lower(),
                 bot_instance=bot
             )
-        return {"filename": file.filename.lower(), "status": "already_indexed",
+        return {"filename": filename.lower(), "status": "already_indexed",
                 "message": "File is already in the knowledge base."}
 
     session_id_val = session_id or "default"
@@ -241,17 +245,17 @@ async def upload_pdf(
     if session_id:
         if session_id not in _sessions:
             _sessions[session_id] = {"active_file": None}
-        _sessions[session_id]["active_file"] = file.filename.lower()
+        _sessions[session_id]["active_file"] = filename.lower()
         from app.services.session_service import SessionManager
         SessionManager.switch_document(
             platform="app",
             session_id=session_id,
-            new_document=file.filename.lower(),
+            new_document=filename.lower(),
             bot_instance=bot
         )
 
-    return {"filename": file.filename.lower(), "status": "ready",
-            "message": f"'{file.filename}' has been fully indexed and is now active! You can start asking questions about it."}
+    return {"filename": filename.lower(), "status": "ready",
+            "message": f"'{filename}' has been fully indexed and is now active! You can start asking questions about it."}
 
 
 @router.get("/files")
@@ -415,7 +419,7 @@ async def chat(request: ChatRequest):
                     new_document=active_file,
                     bot_instance=bot
                 )
-        elif confidence in ("MEDIUM", "LOW"):
+        elif confidence == "MEDIUM" or (confidence == "LOW" and not active_file):
             print(f"--- [ROUTE SYNCHRONIZER] Ambiguity or Low Confidence ({confidence}) detected. Prompting user. ---")
             msg = "Which document are you referring to?\n\n"
             for idx, f in enumerate(all_files, 1):

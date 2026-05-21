@@ -41,6 +41,7 @@ class PDFChatBot:
         # query cache
         self._query_caches: Dict[str, List[Dict]] = {}
         self._cache_threshold = Config.CACHE_SIMILARITY_THRESHOLD
+        self._cache_max = 50
 
     def get_indexed_files(self) -> List[str]:
         """Returns this platform's indexed files as a sorted list. No cross-platform leakage."""
@@ -132,9 +133,12 @@ class PDFChatBot:
                 yield msg
                 return
             elif confidence == "LOW":
-                print(f"--- [ROUTER] Low confidence for all documents. Rejecting query. ---")
-                yield "This question does not appear related to any uploaded document."
-                return
+                if active_file:
+                    pass  # proceed with active_file
+                else:
+                    print(f"--- [ROUTER] Low confidence for all documents. Rejecting query. ---")
+                    yield "This question does not appear related to any uploaded document."
+                    return
         else:
             route_res = await self.route_query(standalone_query, platform_files)
 
@@ -232,8 +236,11 @@ class PDFChatBot:
                 )
 
         # generate fallback
-        def get_fallback_suggestion_message(current_file: str) -> str:
-            other_files = [f for f in platform_files if f.lower() != current_file.lower()]
+        def get_fallback_suggestion_message(current_file: Optional[str]) -> str:
+            if not current_file:
+                other_files = platform_files
+            else:
+                other_files = [f for f in platform_files if f.lower() != current_file.lower()]
             
             msg = "This information was not found in the selected document."
             if other_files:
@@ -475,10 +482,7 @@ class PDFChatBot:
         confidence = "LOW"
         
         if len(sorted_docs) == 1:
-            if best_score >= 0.22:
-                confidence = "HIGH"
-            else:
-                confidence = "LOW"
+            confidence = "HIGH"
         else:
             second_doc, second_score = sorted_docs[1]
             diff = best_score - second_score

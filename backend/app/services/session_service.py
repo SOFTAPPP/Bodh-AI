@@ -1,7 +1,7 @@
 import os
 import shutil
 import gc
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from app.core.config import Config
 from app.services.vector_service import VectorService
 
@@ -21,7 +21,7 @@ class QAChain:
         history: List[dict],
         domain: str,
         similarity_threshold: float,
-        active_file: str,
+        active_file: Optional[str],
         response_intent: str
     ):
         # get vectorstore
@@ -73,14 +73,14 @@ class SessionState:
     Maintains isolated session state variables in-memory for zero stale context leakage.
     """
     def __init__(self, session_id: str, platform: str):
-        self.session_id = session_id
-        self.platform = platform
-        self.active_document = None
-        self.faiss_index_path = None
-        self.vector_store = None
-        self.retriever = None
-        self.qa_chain = None
-        self.memory = []  # message history
+        self.session_id: str = session_id
+        self.platform: str = platform
+        self.active_document: Optional[str] = None
+        self.faiss_index_path: Optional[str] = None
+        self.vector_store: Optional[Any] = None
+        self.retriever: Optional[Any] = None
+        self.qa_chain: Optional['QAChain'] = None
+        self.memory: List[Any] = []  # message history
 
     def unload(self):
         """Explicitly unloads retriever, vector store, and clears memory to prevent leakage."""
@@ -127,7 +127,7 @@ class SessionManager:
             gc.collect()
 
     @classmethod
-    def switch_document(cls, platform: str, session_id: str, new_document: str, bot_instance) -> SessionState:
+    def switch_document(cls, platform: str, session_id: str, new_document: Optional[str], bot_instance) -> 'SessionState':
         session = cls.get_session(platform, session_id)
         if session.active_document != new_document or session.vector_store is None:
             print(f"--- [DOCUMENT SWITCH TRIGGERED] Platform: {platform} | Session: {session_id} | Document: {new_document} ---")
@@ -157,6 +157,8 @@ class SessionManager:
             return
             
         index_dir = session.faiss_index_path
+        if not index_dir:
+            return
         
         # load session_index
         if os.path.exists(index_dir) and os.listdir(index_dir):

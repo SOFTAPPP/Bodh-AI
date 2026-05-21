@@ -4,7 +4,8 @@ import time
 from typing import List, Dict, AsyncIterable, Optional
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
+from pydantic import SecretStr
 from app.core.config import Config
 
 
@@ -19,24 +20,35 @@ class LLMService:
     - HyDE (Hypothetical Document Embeddings) generation
     - Enhanced domain-specific response protocols
     """
-
     def __init__(self):
-        common = dict(
-            groq_api_key=Config.GROQ_API_KEY,
-            temperature=0,
-            streaming=True,
+        groq_api_key = SecretStr(Config.GROQ_API_KEY) if Config.GROQ_API_KEY else None
+        
+        self.generation_llm = ChatGroq(
+            model=Config.GENERATION_MODEL,
+            api_key=groq_api_key,
+            temperature=0.0,
+            streaming=True
         )
-        self.generation_llm = ChatGroq(model_name=Config.GENERATION_MODEL, **common)
-        self.reasoning_llm  = ChatGroq(model_name=Config.REASONING_MODEL,  **common)
-        self.fallback_llm   = ChatGroq(model_name=Config.FALLBACK_MODEL,   **common)
+        self.reasoning_llm  = ChatGroq(
+            model=Config.REASONING_MODEL,
+            api_key=groq_api_key,
+            temperature=0.0,
+            streaming=True
+        )
+        self.fallback_llm   = ChatGroq(
+            model=Config.FALLBACK_MODEL,
+            api_key=groq_api_key,
+            temperature=0.0,
+            streaming=True
+        )
 
         # setup llm
-        hyde_common = dict(
-            groq_api_key=Config.GROQ_API_KEY,
-            temperature=0,
-            streaming=False,
+        self.hyde_llm = ChatGroq(
+            model=Config.HYDE_MODEL,
+            api_key=groq_api_key,
+            temperature=0.0,
+            streaming=False
         )
-        self.hyde_llm = ChatGroq(model_name=Config.HYDE_MODEL, **hyde_common)
 
         print(f"--- LLMService: Groq engine ready [{Config.GENERATION_MODEL}] ---")
 
@@ -62,9 +74,9 @@ class LLMService:
         try:
             resp = await self.hyde_llm.ainvoke(
                 [HumanMessage(content=hyde_prompt)],
-                config={"max_tokens": 150},
+                max_tokens=150,
             )
-            hyde_text = resp.content.strip()
+            hyde_text = str(resp.content).strip()
             print(f"--- HyDE: Generated hypothetical answer ({len(hyde_text)} chars) ---")
             return hyde_text
         except Exception as e:
@@ -99,9 +111,9 @@ class LLMService:
             # query analyzer
             resp = await self.fallback_llm.ainvoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=human_msg)],
-                config={"max_tokens": 120},
+                max_tokens=120,
             )
-            match = re.search(r"\{.*\}", resp.content, re.DOTALL)
+            match = re.search(r"\{.*\}", str(resp.content), re.DOTALL)
             if match:
                 return json.loads(match.group())
         except Exception as e:
@@ -273,7 +285,10 @@ class LLMService:
                 print(f"--- LLMService: Streaming with [{label}] ---")
                 async for chunk in llm.astream(messages):
                     if chunk.content:
-                        yield chunk.content
+                        if isinstance(chunk.content, str):
+                            yield chunk.content
+                        else:
+                            yield str(chunk.content)
                 return
             except Exception as e:
                 err = str(e)
@@ -314,7 +329,7 @@ class LLMService:
                 "Simply reply to their comment or greeting naturally, and if appropriate, let them know you are ready to answer any questions they have about their active document."
             )
         
-        messages = [SystemMessage(content=system_content)]
+        messages: List[BaseMessage] = [SystemMessage(content=system_content)]
         for turn in history[-5:]: # trim history
             role = turn.get("role", "user")
             content = turn.get("content", turn.get("message", ""))
@@ -334,7 +349,10 @@ class LLMService:
             try:
                 async for chunk in llm.astream(messages):
                     if chunk.content:
-                        yield chunk.content
+                        if isinstance(chunk.content, str):
+                            yield chunk.content
+                        else:
+                            yield str(chunk.content)
                 return
             except Exception as e:
                 print(f"--- [CHITCHAT ERROR] {label}: {e} ---")
@@ -353,8 +371,8 @@ class LLMService:
             f"Document Excerpt:\n{text_sample[:4000]}"
         )
         try:
-            resp = await self.fallback_llm.ainvoke([HumanMessage(content=prompt)], config={"max_tokens": 200})
-            content = resp.content.strip()
+            resp = await self.fallback_llm.ainvoke([HumanMessage(content=prompt)], max_tokens=200)
+            content = str(resp.content).strip()
             # clean output
             match = re.search(r"\{.*\}", content, re.DOTALL)
             if match:

@@ -259,7 +259,7 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
                     new_document=active_file,
                     bot_instance=wa_bot
                 )
-        elif confidence in ("MEDIUM", "LOW"):
+        elif confidence == "MEDIUM" or (confidence == "LOW" and not active_file):
             print(f"--- [ROUTE SYNCHRONIZER] WhatsApp Ambiguity or Low Confidence ({confidence}) detected. Prompting user. ---")
             msg = "Which document are you referring to?\n\n"
             for idx, f in enumerate(all_files, 1):

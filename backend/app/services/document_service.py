@@ -2,11 +2,12 @@ import os
 import uuid
 from datetime import datetime, timezone
 from langchain_community.document_loaders import PyMuPDFLoader
+from typing import Optional
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.core.config import Config
 
 class DocumentService:
-    def __init__(self, upload_dir: str = None, indexed_files_log: str = None):
+    def __init__(self, upload_dir: Optional[str] = None, indexed_files_log: Optional[str] = None):
         self.upload_dir       = upload_dir       or Config.UPLOAD_DIR
         self.indexed_files_log = indexed_files_log or Config.INDEXED_FILES_LOG
 
