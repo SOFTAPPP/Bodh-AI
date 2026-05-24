@@ -386,7 +386,7 @@ async def chat(request: ChatRequest):
 
     if not is_selection_retry and all_files:
 
-        if request.niche:
+        if request.niche and request.demo_mode:
             standalone_query = request.message
         else:
             intent = await bot.llm_service.analyze_query(request.message, request.history)
@@ -424,9 +424,9 @@ async def chat(request: ChatRequest):
 
     _query_log.append({
         "ts": datetime.utcnow().isoformat(),
-        "niche": request.niche or "auto",
+        "niche": request.niche if request.demo_mode else "auto",
         "query": request.message,
-        "demo": False,
+        "demo": request.demo_mode,
     })
 
     effective_history = request.history
@@ -443,7 +443,7 @@ async def chat(request: ChatRequest):
             request.message,
             effective_history,
             active_file,
-            niche_hint=request.niche,
+            niche_hint=request.niche if request.demo_mode else None,
             is_selection_retry=is_selection_retry,
             session_id=session_id,
         ):

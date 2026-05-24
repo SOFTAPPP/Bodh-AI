@@ -23,29 +23,37 @@ class LLMService:
         groq_api_key = SecretStr(Config.GROQ_API_KEY) if Config.GROQ_API_KEY else None
 
         self.generation_llm = ChatGroq(
-            model=Config.GENERATION_MODEL,
-            api_key=groq_api_key,
-            temperature=0.0,
-            streaming=True
+            **{
+                "model": Config.GENERATION_MODEL,
+                "api_key": groq_api_key,
+                "temperature": 0.0,
+                "streaming": True
+            }
         )
         self.reasoning_llm  = ChatGroq(
-            model=Config.REASONING_MODEL,
-            api_key=groq_api_key,
-            temperature=0.0,
-            streaming=True
+            **{
+                "model": Config.REASONING_MODEL,
+                "api_key": groq_api_key,
+                "temperature": 0.0,
+                "streaming": True
+            }
         )
         self.fallback_llm   = ChatGroq(
-            model=Config.FALLBACK_MODEL,
-            api_key=groq_api_key,
-            temperature=0.0,
-            streaming=True
+            **{
+                "model": Config.FALLBACK_MODEL,
+                "api_key": groq_api_key,
+                "temperature": 0.0,
+                "streaming": True
+            }
         )
 
         self.hyde_llm = ChatGroq(
-            model=Config.HYDE_MODEL,
-            api_key=groq_api_key,
-            temperature=0.0,
-            streaming=False
+            **{
+                "model": Config.HYDE_MODEL,
+                "api_key": groq_api_key,
+                "temperature": 0.0,
+                "streaming": False
+            }
         )
 
         print(f"--- LLMService: Groq engine ready [{Config.GENERATION_MODEL}] ---")
@@ -131,15 +139,15 @@ class LLMService:
         intent = "complex_analysis" if any(kw in q for kw in complex_kw) else "fact_extraction"
 
         domain = "general"
-        if any(kw in q for kw in ["court", "plaintiff", "defendant", "judgment", "legal", "law", "clause", "section", "advocate", "appeal", "verdict"]):
+        if any(kw in q for kw in ["court", "plaintiff", "defendant", "judgment", "legal", "law", "clause", "section", "advocate", "appeal", "verdict", "agreement", "contract", "parties", "herein", "thereof", "confidentiality", "indemnification", "termination", "governing law", "jurisdiction", "liability", "damages", "warranties", "covenants"]):
             domain = "legal"
-        elif any(kw in q for kw in ["patient", "diagnosis", "treatment", "clinical", "medical", "hospital", "drug", "prescription", "dosage", "therapy"]):
+        elif any(kw in q for kw in ["patient", "diagnosis", "treatment", "clinical", "medical", "hospital", "drug", "prescription", "dosage", "therapy", "physician", "doctor", "symptoms", "vital signs", "blood pressure", "heart rate", "cholesterol", "illness", "disease", "medication", "clinic", "report"]):
             domain = "medical"
-        elif any(kw in q for kw in ["resume", "cv", "hire", "skills", "candidate", "experience", "job", "certification"]):
+        elif any(kw in q for kw in ["resume", "cv", "hire", "skills", "candidate", "experience", "job", "certification", "certifications", "degree", "degrees", "degress", "education", "study", "university", "college", "gpa", "cgpa", "school", "major", "qualified", "background", "career", "work", "profile", "employ", "history", "languages", "projects", "contact", "phone", "email", "address", "details"]):
             domain = "hr"
-        elif any(kw in q for kw in ["revenue", "invoice", "tax", "profit", "financial", "audit", "balance sheet", "transaction"]):
+        elif any(kw in q for kw in ["revenue", "invoice", "tax", "profit", "financial", "audit", "balance sheet", "transaction", "income", "expenses", "sales", "loss", "assets", "liabilities", "cash flow", "payment", "due", "overdue", "cost", "billing", "cpa"]):
             domain = "financial"
-        elif any(kw in q for kw in ["research", "methodology", "abstract", "hypothesis", "study", "findings", "literature"]):
+        elif any(kw in q for kw in ["research", "methodology", "abstract", "hypothesis", "study", "findings", "literature", "paper", "journal", "experiment", "results", "discussion", "citation", "author", "conclusion", "data analysis"]):
             domain = "academic"
 
         return {"standalone_query": query, "domain": domain, "intent": intent}
