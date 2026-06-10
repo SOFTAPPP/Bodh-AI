@@ -295,7 +295,7 @@ class PDFChatBot:
                 yield "\n\n" + suggestion_only
 
     async def process_new_pdf(self, file_path: str, session_id: str = "default") -> int:
-        """Indexes a single PDF into its isolated FAISS index (runs in background task)."""
+        """Indexes a single document into its isolated FAISS index. Supports PDF, DOCX, XLSX, TXT, CSV, PPTX."""
         try:
             filename = os.path.basename(file_path).lower()
             clean_doc = "".join(c for c in filename if c.isalnum() or c in (".", "_", "-")).lower()
@@ -511,7 +511,8 @@ class PDFChatBot:
         }
 
     async def sync_data_folder(self) -> int:
-        """Parallel indexing of all un-indexed PDFs in this platform's uploads folder."""
+        """Parallel indexing of all un-indexed supported files in this platform's uploads folder."""
+        from app.services.document_service import SUPPORTED_EXTENSIONS
         upload_dir = self.doc_service.upload_dir
         if not os.path.exists(upload_dir):
             os.makedirs(upload_dir, exist_ok=True)
@@ -520,7 +521,7 @@ class PDFChatBot:
         pending = [
             os.path.join(upload_dir, f)
             for f in os.listdir(upload_dir)
-            if f.lower().endswith(".pdf") and f.lower() not in indexed_files
+            if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS and f.lower() not in indexed_files
         ]
         if not pending:
             return 0

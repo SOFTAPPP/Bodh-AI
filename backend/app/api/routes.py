@@ -207,12 +207,14 @@ async def upload_pdf(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None)
 ):
+    from app.services.document_service import SUPPORTED_EXTENSIONS
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename missing.")
     filename: str = file.filename
 
-    if not filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
 
     upload_path = os.path.join(bot.doc_service.upload_dir, filename)
     with open(upload_path, "wb") as buffer:

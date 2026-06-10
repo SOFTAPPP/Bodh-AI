@@ -79,11 +79,14 @@ async def process_whatsapp_message(phone_number: str, message: dict, t_web_recei
             media_id = document.get("id")
             filename = document.get("filename", f"wa_doc_{media_id}.pdf")
 
-            if not filename.endswith(".pdf"):
-                await wa_service.send_message(phone_number, "Sorry, I can only process PDF documents right now.")
+            from app.services.document_service import SUPPORTED_EXTENSIONS
+            import os as _os
+            ext = _os.path.splitext(filename)[1].lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                await wa_service.send_message(phone_number, f"Sorry, I can only process these file types: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
                 return
 
-            print(f"--- [WHATSAPP PDF UPLOAD DETECTED] File: {filename} ---")
+            print(f"--- [WHATSAPP DOCUMENT UPLOAD DETECTED] File: {filename} ---")
 
             try:
                 t_parallel_start = time.perf_counter()

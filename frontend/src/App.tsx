@@ -598,14 +598,14 @@ function App() {
 
             <div className="upload-section">
               <label className={`upload-card ${isUploading ? 'loading' : ''}`}>
-                <input type="file" accept=".pdf" onChange={handleFileUpload} hidden />
+                <input type="file" accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.csv,.pptx" onChange={handleFileUpload} hidden />
                 {isUploading ? (
                   <Loader2 size={32} className="upload-icon spin" />
                 ) : (
                   <Upload size={32} className="upload-icon" />
                 )}
                 <p>{isUploading ? 'Processing...' : 'Upload Files'}</p>
-                <span>Supports .pdf files</span>
+                <span>PDF, DOCX, XLSX, TXT, CSV, PPTX</span>
               </label>
             </div>
 

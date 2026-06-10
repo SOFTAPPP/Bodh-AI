@@ -11,3 +11,6 @@ python-dotenv
 sentence-transformers
 pymupdf
 numpy
+docx2txt
+openpyxl
+python-pptx

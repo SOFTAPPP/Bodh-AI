@@ -1,10 +1,13 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from langchain_community.document_loaders import PyMuPDFLoader
-from typing import Optional
+from langchain_community.document_loaders import PyMuPDFLoader, TextLoader, CSVLoader
+from typing import Optional, List
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from app.core.config import Config
+
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt", ".csv", ".pptx"}
 
 class DocumentService:
     def __init__(self, upload_dir: Optional[str] = None, indexed_files_log: Optional[str] = None):
@@ -41,10 +44,81 @@ class DocumentService:
             separators=["\n\n", "\n", ".", " ", ""]
         )
 
+    def _load_file(self, file_path: str) -> List[Document]:
+        """Loads a document from any supported file format."""
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == ".pdf":
+            loader = PyMuPDFLoader(file_path)
+            return loader.load()
+
+        elif ext in (".docx", ".doc"):
+            import docx2txt
+            text = docx2txt.process(file_path)
+            return [Document(page_content=text, metadata={"source": file_path, "page": 0})]
+
+        elif ext in (".xlsx", ".xls"):
+            return self._load_excel(file_path)
+
+        elif ext == ".txt":
+            loader = TextLoader(file_path, encoding="utf-8")
+            return loader.load()
+
+        elif ext == ".csv":
+            loader = CSVLoader(file_path, encoding="utf-8")
+            return loader.load()
+
+        elif ext == ".pptx":
+            return self._load_pptx(file_path)
+
+        else:
+            raise ValueError(f"Unsupported file extension: {ext}")
+
+    def _load_excel(self, file_path: str) -> List[Document]:
+        """Loads Excel files, converting each sheet's rows into document chunks."""
+        import openpyxl
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        documents = []
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                continue
+            headers = [str(h) if h is not None else "" for h in rows[0]]
+            text_parts = [f"Sheet: {sheet_name}\n"]
+            text_parts.append(" | ".join(headers))
+            text_parts.append("-" * 40)
+            for row in rows[1:]:
+                row_text = " | ".join(str(cell) if cell is not None else "" for cell in row)
+                if row_text.replace(" | ", "").strip():
+                    text_parts.append(row_text)
+            documents.append(Document(
+                page_content="\n".join(text_parts),
+                metadata={"source": file_path, "sheet": sheet_name, "page": 0}
+            ))
+        wb.close()
+        return documents
+
+    def _load_pptx(self, file_path: str) -> List[Document]:
+        """Loads PowerPoint files, converting each slide into a document."""
+        from pptx import Presentation
+        prs = Presentation(file_path)
+        documents = []
+        for i, slide in enumerate(prs.slides):
+            text_parts = []
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    text_parts.append(shape.text.strip())
+            if text_parts:
+                documents.append(Document(
+                    page_content="\n".join(text_parts),
+                    metadata={"source": file_path, "page": i + 1}
+                ))
+        return documents
+
     def process_pdf(self, file_path: str):
-        """Loads and splits a PDF into domain-optimized chunks."""
-        loader = PyMuPDFLoader(file_path)
-        documents = loader.load()
+        """Loads and splits a document into domain-optimized chunks. Supports PDF, DOCX, XLSX, TXT, CSV, PPTX."""
+        documents = self._load_file(file_path)
 
         file_name = os.path.basename(file_path).lower()
 
