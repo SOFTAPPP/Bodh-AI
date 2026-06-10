@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, type JSX } from 'react';
-import { Upload, Send, FileText, Bot, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon, Home, Pause } from 'lucide-react';
+import { Upload, Send, FileText, BrainCircuit, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon, Home, Pause } from 'lucide-react';
 import './App.css';
 
 interface Message {
@@ -426,7 +426,7 @@ function App() {
     <div className="landing-container view-transition">
       <nav className="landing-nav">
         <div className="logo-group">
-          <Bot className="logo-icon-nav" />
+          <BrainCircuit className="logo-icon-nav" />
           <span className="logo-text">BodhAI</span>
         </div>
         <div className="nav-links">
@@ -501,7 +501,7 @@ function App() {
     <div className="features-container view-transition">
       <nav className="landing-nav">
         <div className="logo-group">
-          <Bot className="logo-icon-nav" />
+          <BrainCircuit className="logo-icon-nav" />
           <span className="logo-text">BodhAI</span>
         </div>
         <div className="nav-links">
@@ -522,7 +522,7 @@ function App() {
       <div className="features-grid">
         {[
           { icon: <CheckCircle2 size={32} />, title: 'Zero Hallucination', desc: 'Strict grounding logic ensures every answer is backed by document facts.' },
-          { icon: <Bot size={32} />, title: 'Verbatim Evidence', desc: 'Get exact quotes and chunk references for every response generated.' },
+          { icon: <BrainCircuit size={32} />, title: 'Verbatim Evidence', desc: 'Get exact quotes and chunk references for every response generated.' },
           { icon: <Mic size={32} />, title: 'Voice Intelligence', desc: 'Natural voice-to-text integration for hands-free document analysis.' },
           { icon: <Loader2 size={32} />, title: 'Rapid Ingestion', desc: 'Proprietary pipeline processes massive PDFs in seconds with local embeddings.' },
           { icon: <Sun size={32} />, title: 'Adaptive UI', desc: 'Seamlessly switch between Dark and Light modes for any environment.' },
@@ -591,7 +591,7 @@ function App() {
           <aside className="sidebar">
             <div className="logo" onClick={() => setView('landing')} style={{ cursor: 'pointer' }}>
               <div className="logo-icon">
-                <Bot size={24} color="white" />
+                <BrainCircuit size={24} color="white" />
               </div>
               <h2>BodhAI</h2>
             </div>
@@ -635,7 +635,7 @@ function App() {
 
             <div className="sidebar-nav">
               <button onClick={() => setView('landing')}><Home size={18} /> Home</button>
-              <button onClick={() => setView('features')}><Bot size={18} /> Features</button>
+              <button onClick={() => setView('features')}><BrainCircuit size={18} /> Features</button>
             </div>
 
             <div className="sidebar-footer">
@@ -666,7 +666,7 @@ function App() {
             <div className="messages-container">
               {messages.length === 0 && (
                 <div className="empty-state">
-                  <div className="empty-icon"><Bot size={54} strokeWidth={1.5} /></div>
+                  <div className="empty-icon"><BrainCircuit size={54} strokeWidth={1.5} /></div>
                   <h2>AI Knowledge Employee</h2>
                   <p>Upload a document below, then ask anything. No hallucinations — every answer is grounded in your data.</p>
                   {/* Niche tabs in chat */}
@@ -695,7 +695,7 @@ function App() {
               {messages.map((msg) => (
                 <div key={msg.id} className={`message-wrapper ${msg.role}`}>
                   <div className="message-icon">
-                    {msg.role === 'bot' ? <Bot size={20} /> : <User size={20} />}
+                    {msg.role === 'bot' ? <BrainCircuit size={20} /> : <User size={20} />}
                   </div>
                   <div className="message-content">
                     <div className={`message-bubble ${!msg.content && msg.role === 'bot' ? 'pulse' : ''}`}>
