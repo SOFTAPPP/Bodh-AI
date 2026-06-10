@@ -40,28 +40,43 @@ class QAChain:
             safe_content = doc.page_content[:60].encode('ascii', errors='replace').decode('ascii').replace('\n', ' ')
             print(f"  - Score: {score:.4f} | File: {doc.metadata.get('source_file')} | Chunk: {doc.metadata.get('chunk_index')} | Content: {safe_content}...")
 
-        filtered_docs = [
-            doc for doc, score in scored
+        filtered_scored = [
+            (doc, score) for doc, score in scored
             if score >= similarity_threshold
         ]
 
         if active_file:
             af_lower = active_file.lower()
-            filtered_docs = [d for d in filtered_docs if d.metadata.get("source_file", "").lower() == af_lower]
+            filtered_scored = [(d, s) for d, s in filtered_scored if d.metadata.get("source_file", "").lower() == af_lower]
 
-        if not filtered_docs:
+        if not filtered_scored:
             return [], ""
 
-        sorted_docs = sorted(
-            filtered_docs,
-            key=lambda x: (x.metadata.get("source_file", ""), x.metadata.get("chunk_index", 0))
+        sorted_scored = sorted(
+            filtered_scored,
+            key=lambda x: x[1],
+            reverse=True
         )
 
-        context_text = "\n\n".join(
-            f"--- SOURCE: {d.metadata.get('source_file', 'unknown')} | "
-            f"Page {d.metadata.get('page', '?')} ---\n{d.page_content}"
-            for d in sorted_docs
-        )
+        sorted_docs = [doc for doc, _ in sorted_scored]
+
+        MAX_CONTEXT_CHARS = 24000
+        context_parts = []
+        total_chars = 0
+        for d, s in sorted_scored:
+            chunk_text = (
+                f"--- SOURCE: {d.metadata.get('source_file', 'unknown')} | "
+                f"Page {d.metadata.get('page', '?')} | RELEVANCE: {s:.2f} ---\n{d.page_content}"
+            )
+            if total_chars + len(chunk_text) > MAX_CONTEXT_CHARS:
+                remaining = MAX_CONTEXT_CHARS - total_chars
+                if remaining > 200:
+                    context_parts.append(chunk_text[:remaining] + "\n[...truncated...]")
+                break
+            context_parts.append(chunk_text)
+            total_chars += len(chunk_text)
+
+        context_text = "\n\n".join(context_parts)
 
         return sorted_docs, context_text
 

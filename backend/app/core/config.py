@@ -18,9 +18,9 @@ class Config:
     VECTOR_STORE_DIR  = os.path.join(DATA_DIR, "vector_store")
     INDEXED_FILES_LOG = os.path.join(DATA_DIR, "indexed_files.txt")
 
-    WA_UPLOAD_DIR        = UPLOAD_DIR
-    WA_VECTOR_STORE_DIR  = VECTOR_STORE_DIR
-    WA_INDEXED_FILES_LOG = INDEXED_FILES_LOG
+    WA_UPLOAD_DIR        = os.path.join(DATA_DIR, "wa_uploads")
+    WA_VECTOR_STORE_DIR  = os.path.join(DATA_DIR, "wa_vector_store")
+    WA_INDEXED_FILES_LOG = os.path.join(DATA_DIR, "wa_indexed_files.txt")
 
     GENERATION_MODEL = "llama-3.3-70b-versatile"
     REASONING_MODEL  = "deepseek-r1-distill-llama-70b"
@@ -81,7 +81,7 @@ class Config:
     TOP_K             = 12
     SIMILARITY_THRESHOLD = 0.25
 
-    CACHE_SIMILARITY_THRESHOLD = 0.98
+    CACHE_SIMILARITY_THRESHOLD = 0.95
 
     @classmethod
     def get_domain_config(cls, domain: str) -> dict:

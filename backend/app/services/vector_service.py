@@ -48,7 +48,9 @@ class VectorService:
         _ = self.embeddings
 
     def load_index(self) -> bool:
-        """Loads FAISS index from this instance's store_dir."""
+        """Loads FAISS index from this instance's store_dir. Skips if already loaded."""
+        if self.vector_store is not None:
+            return True
         if os.path.exists(self._store_dir) and os.listdir(self._store_dir):
             try:
                 self.vector_store = FAISS.load_local(
@@ -157,12 +159,8 @@ class VectorService:
             if filtered:
                 return filtered
 
-            if active_file:
-                af_lower = active_file.lower()
-                af_scored = [(doc, s) for doc, s in scored if doc.metadata.get("source_file", "").lower() == af_lower]
-                if af_scored:
-                    return [doc for doc, _ in af_scored[:k]]
-            return [doc for doc, _ in scored[:3]]
+            print(f"--- VectorService: No chunks above threshold ({similarity_threshold}). Returning empty. ---")
+            return []
 
         except Exception as e:
             print(f"--- VectorService search error: {e}. Falling back to basic search. ---")

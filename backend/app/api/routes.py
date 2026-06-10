@@ -388,11 +388,14 @@ async def chat(request: ChatRequest):
 
         if request.niche and request.demo_mode:
             standalone_query = request.message
+            route_res = await bot.route_query(standalone_query, all_files)
         else:
-            intent = await bot.llm_service.analyze_query(request.message, request.history)
+            import asyncio as _asyncio
+            classify_task = _asyncio.create_task(bot.llm_service.analyze_query(request.message, request.history))
+            route_task = _asyncio.create_task(bot.route_query(request.message, all_files))
+            intent, route_res = await _asyncio.gather(classify_task, route_task)
             standalone_query = intent.get("standalone_query", request.message)
 
-        route_res = await bot.route_query(standalone_query, all_files)
         confidence = route_res["confidence"]
         best_doc = route_res["best_doc"]
 
@@ -407,8 +410,25 @@ async def chat(request: ChatRequest):
                     new_document=active_file,
                     bot_instance=bot
                 )
-        elif confidence == "MEDIUM" or (confidence == "LOW" and not active_file):
-            print(f"--- [ROUTE SYNCHRONIZER] Ambiguity or Low Confidence ({confidence}) detected. Prompting user. ---")
+        elif confidence == "MEDIUM":
+            if not active_file:
+                print(f"--- [ROUTE SYNCHRONIZER] Ambiguity detected with no active file. Prompting user. ---")
+                msg = "Which document are you referring to?\n\n"
+                for idx, f in enumerate(all_files, 1):
+                    msg += f"{idx}. **{f}**\n"
+                msg += "\nPlease select a document by replying with its number or name."
+                _sessions[session_id]["active_file"] = None
+                SessionManager.switch_document(
+                    platform="app",
+                    session_id=session_id,
+                    new_document=None,
+                    bot_instance=bot
+                )
+                return StreamingResponse(iter([msg]), media_type="text/plain")
+            else:
+                print(f"--- [ROUTE SYNCHRONIZER] Ambiguity detected but active file exists ({active_file}). Trusting user's recent upload. ---")
+        elif confidence == "LOW" and not active_file:
+            print(f"--- [ROUTE SYNCHRONIZER] Low Confidence with no active file. Prompting user. ---")
             msg = "Which document are you referring to?\n\n"
             for idx, f in enumerate(all_files, 1):
                 msg += f"{idx}. **{f}**\n"

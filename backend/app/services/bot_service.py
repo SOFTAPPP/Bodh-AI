@@ -38,7 +38,9 @@ class PDFChatBot:
 
         self._query_caches: Dict[str, List[Dict]] = {}
         self._cache_threshold = Config.CACHE_SIMILARITY_THRESHOLD
-        self._cache_max = 50
+        self._cache_max = 100
+        self._metadata_cache: Dict[str, Dict] = {}
+        self._metadata_cache_ts: float = 0.0
 
     def get_indexed_files(self) -> List[str]:
         """Returns this platform's indexed files as a sorted list. No cross-platform leakage."""
@@ -97,9 +99,17 @@ class PDFChatBot:
             intent, query_embedding = await asyncio.gather(intent_task, embed_task)
             standalone_query = query
         else:
-            intent           = await self.llm_service.analyze_query(query, history)
+            intent_task  = asyncio.create_task(self.llm_service.analyze_query(query, history))
+            embed_task   = asyncio.create_task(self.vector_service.aembed_query(query))
+            intent, raw_embedding = await asyncio.gather(intent_task, embed_task)
+
             standalone_query = intent.get("standalone_query", query)
-            query_embedding  = await self.vector_service.aembed_query(standalone_query)
+
+            if standalone_query.lower().strip() != query.lower().strip():
+                print(f"--- [CLASSIFY] Query resolved: '{query}' → '{standalone_query}' ---")
+                query_embedding = await self.vector_service.aembed_query(standalone_query)
+            else:
+                query_embedding = raw_embedding
 
         t_embed = time.perf_counter()
         print(f"--- [PERF] Classify + Embed: {t_embed - t0:.4f}s ---")
@@ -107,7 +117,8 @@ class PDFChatBot:
         auto_switch_message = ""
 
         if not is_selection_retry:
-            route_res = await self.route_query(standalone_query, platform_files)
+            route_task = asyncio.create_task(self.route_query(standalone_query, platform_files))
+            route_res = await route_task
             best_doc = route_res["best_doc"]
             confidence = route_res["confidence"]
 
@@ -117,16 +128,19 @@ class PDFChatBot:
                     print(f"--- [AUTO-SWITCH] Switching active document from {active_file} to {best_doc} ---")
                     active_file = best_doc
             elif confidence == "MEDIUM":
-                print(f"--- [ROUTER] Medium confidence / Ambiguity detected. Prompting user. ---")
-                msg = "Which document are you referring to?\n\n"
-                for idx, f in enumerate(platform_files, 1):
-                    msg += f"{idx}. **{f}**\n"
-                msg += "\nPlease select a document by replying with its number or name."
-                yield msg
-                return
+                if not active_file:
+                    print(f"--- [ROUTER] Medium confidence with no active file. Prompting user. ---")
+                    msg = "Which document are you referring to?\n\n"
+                    for idx, f in enumerate(platform_files, 1):
+                        msg += f"{idx}. **{f}**\n"
+                    msg += "\nPlease select a document by replying with its number or name."
+                    yield msg
+                    return
+                else:
+                    print(f"--- [ROUTER] Medium confidence but active file exists ({active_file}). Trusting user's recent upload. ---")
             elif confidence == "LOW":
                 if active_file:
-                    pass
+                    print(f"--- [ROUTER] Low confidence but active file exists ({active_file}). Proceeding. ---")
                 else:
                     print(f"--- [ROUTER] Low confidence for all documents. Rejecting query. ---")
                     yield "This question does not appear related to any uploaded document."
@@ -175,7 +189,7 @@ class PDFChatBot:
         ) or any(char.isdigit() for char in standalone_query)
 
         hyde_embedding = None
-        if Config.HYDE_ENABLED and not is_ordinal_query:
+        if Config.HYDE_ENABLED and not is_ordinal_query and response_intent == "complex_analysis":
             hyde_text = await self.llm_service.generate_hypothetical_answer(standalone_query, domain)
             if hyde_text:
                 hyde_embedding = await self.vector_service.aembed_query(hyde_text)
@@ -209,14 +223,15 @@ class PDFChatBot:
               f"{len(docs)} chunks [domain={domain}, threshold={similarity_threshold}] ---")
 
         if not docs and active_file:
-            print(f"--- [FALLBACK] No docs above threshold for '{active_file}'. Retrying with 0.0 threshold... ---")
+            relaxed_threshold = max(similarity_threshold * 0.5, 0.1)
+            print(f"--- [FALLBACK] No docs above threshold for '{active_file}'. Retrying with relaxed threshold {relaxed_threshold:.2f}... ---")
             if session.qa_chain:
                 docs, context_text = await session.qa_chain.ainvoke(
                     query=standalone_query,
                     embedding=search_embedding,
                     history=history,
                     domain=domain,
-                    similarity_threshold=-1.0,
+                    similarity_threshold=relaxed_threshold,
                     active_file=active_file,
                     response_intent=response_intent
                 )
@@ -258,7 +273,7 @@ class PDFChatBot:
         full_response = ""
 
         async for chunk in self.llm_service.generate_response(
-            standalone_query, context_text, domain=final_domain, intent=response_intent
+            standalone_query, context_text, domain=final_domain, intent=response_intent, history=history
         ):
             if not first_token:
                 ttft = time.perf_counter() - t_gen
@@ -392,26 +407,36 @@ class PDFChatBot:
                 except Exception as e:
                     print(f"--- [METADATA] Backfill failed for {filename}: {e} ---")
 
+    async def _load_metadata_cached(self) -> Dict:
+        """Loads document metadata from disk with in-memory caching (5s TTL)."""
+        import json
+        import time
+        metadata_file = os.path.join(Config.DATA_DIR, f"document_metadata_{self.platform}.json")
+        if not os.path.exists(metadata_file):
+            return {}
+        file_mtime = os.path.getmtime(metadata_file)
+        if self._metadata_cache and file_mtime <= self._metadata_cache_ts:
+            return self._metadata_cache
+        try:
+            with open(metadata_file, "r", encoding="utf-8") as f:
+                self._metadata_cache = json.load(f)
+                self._metadata_cache_ts = file_mtime
+        except Exception as e:
+            print(f"--- [ROUTER] Error loading metadata: {e} ---")
+        return self._metadata_cache
+
     async def route_query(self, query: str, platform_files: List[str]) -> Dict:
         """
         Intelligently matches the user query to the most semantically relevant document.
         Returns routing details and confidence.
         """
-        import json
         import re
         if not platform_files:
             return {"best_doc": None, "confidence": "LOW", "similarities": {}}
 
         await self.ensure_all_metadata_exists()
 
-        metadata_file = os.path.join(Config.DATA_DIR, f"document_metadata_{self.platform}.json")
-        metadata_dict = {}
-        if os.path.exists(metadata_file):
-            try:
-                with open(metadata_file, "r", encoding="utf-8") as f:
-                    metadata_dict = json.load(f)
-            except Exception as e:
-                print(f"--- [ROUTER] Error loading metadata: {e} ---")
+        metadata_dict = await self._load_metadata_cached()
 
         query_embedding = await self.vector_service.aembed_query(query)
         q_lower = query.lower()

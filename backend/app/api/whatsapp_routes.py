@@ -231,10 +231,11 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
                 prepend_msg = f"**{active_file}** selected. \n\n"
 
     if not is_selection_retry and all_files:
-        intent = await wa_bot.llm_service.analyze_query(text, history)
+        classify_task = asyncio.create_task(wa_bot.llm_service.analyze_query(text, history))
+        route_task = asyncio.create_task(wa_bot.route_query(text, all_files))
+        intent, route_res = await asyncio.gather(classify_task, route_task)
         standalone_query = intent.get("standalone_query", text)
 
-        route_res = await wa_bot.route_query(standalone_query, all_files)
         confidence = route_res["confidence"]
         best_doc = route_res["best_doc"]
 
@@ -250,8 +251,27 @@ async def handle_text_message(phone_number: str, text: str, t_web_received: floa
                     new_document=active_file,
                     bot_instance=wa_bot
                 )
-        elif confidence == "MEDIUM" or (confidence == "LOW" and not active_file):
-            print(f"--- [ROUTE SYNCHRONIZER] WhatsApp Ambiguity or Low Confidence ({confidence}) detected. Prompting user. ---")
+        elif confidence == "MEDIUM":
+            if not active_file:
+                print(f"--- [ROUTE SYNCHRONIZER] WhatsApp Ambiguity detected with no active file. Prompting user. ---")
+                msg = "Which document are you referring to?\n\n"
+                for idx, f in enumerate(all_files, 1):
+                    msg += f"{idx}. **{f}**\n"
+                msg += "\nPlease select a document by replying with its number or name."
+                await wa_service.set_user_file(phone_number, None)
+                SessionManager.switch_document(
+                    platform="whatsapp",
+                    session_id=phone_number,
+                    new_document=None,
+                    bot_instance=wa_bot
+                )
+                await wa_service.add_conversation_turn(phone_number, text, msg)
+                await wa_service.send_message(phone_number, msg)
+                return
+            else:
+                print(f"--- [ROUTE SYNCHRONIZER] WhatsApp Ambiguity detected but active file exists ({active_file}). Trusting user's recent upload. ---")
+        elif confidence == "LOW" and not active_file:
+            print(f"--- [ROUTE SYNCHRONIZER] WhatsApp Low Confidence with no active file. Prompting user. ---")
             msg = "Which document are you referring to?\n\n"
             for idx, f in enumerate(all_files, 1):
                 msg += f"{idx}. **{f}**\n"

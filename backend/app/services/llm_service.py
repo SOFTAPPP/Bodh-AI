@@ -95,10 +95,16 @@ class LLMService:
         Returns structured intent + rephrased standalone query + domain.
 
         Skips the LLM entirely for single-turn queries — uses heuristics instead.
+        For multi-turn, attempts heuristic pronoun resolution first (0ms), falls back to LLM only if ambiguous.
         """
 
         if not history:
             return self._heuristic_classify(query)
+
+        heuristic_result = self._heuristic_resolve_pronouns(query, history)
+        if heuristic_result:
+            print(f"--- [CLASSIFY] Heuristic multi-turn resolved in 0ms: '{heuristic_result['standalone_query']}' ---")
+            return heuristic_result
 
         system_prompt = (
             "You are a RAG query classifier. Output ONLY valid JSON, no markdown fences:\n"
@@ -130,6 +136,56 @@ class LLMService:
             print(f"--- analyze_query error: {e}. Using heuristics. ---")
 
         return self._heuristic_classify(query)
+
+    def _heuristic_resolve_pronouns(self, query: str, history: List[Dict[str, str]]) -> Optional[Dict]:
+        """
+        Zero-latency pronoun resolution for multi-turn conversations.
+        Returns None if the query is already self-contained or too ambiguous.
+        """
+        import re as re_module
+        q_lower = query.lower().strip()
+
+        short_pronouns = ["it", "this", "that", "they", "them", "he", "she"]
+        phrase_pronouns = ["the document", "the report", "the file", "the contract", "the agreement"]
+
+        has_short = any(re_module.search(r'\b' + re_module.escape(p) + r'\b', q_lower) for p in short_pronouns)
+        has_phrase = any(p in q_lower for p in phrase_pronouns)
+        has_pronoun = has_short or has_phrase
+
+        if not has_pronoun:
+            return self._heuristic_classify(query)
+
+        last_assistant = None
+        for turn in reversed(history):
+            if turn.get("role") in ("assistant", "bot"):
+                last_assistant = turn.get("content", "")
+                break
+
+        if not last_assistant:
+            return None
+
+        source_matches = re_module.findall(r'SOURCE:\s*([^\|\]]+)', last_assistant)
+        if source_matches:
+            subject = source_matches[0].strip().replace('.pdf', '').replace('_', ' ').title()
+        else:
+            bold_matches = re_module.findall(r'\*\*([^*]+)\*\*', last_assistant[:500])
+            if bold_matches:
+                subject = bold_matches[0].strip()
+            else:
+                return None
+
+        resolved_query = query
+        for p in short_pronouns:
+            if re_module.search(r'\b' + re_module.escape(p) + r'\b', resolved_query.lower()):
+                resolved_query = re_module.sub(r'\b' + re_module.escape(p) + r'\b', subject, resolved_query, count=1, flags=re_module.IGNORECASE)
+                break
+        else:
+            for p in phrase_pronouns:
+                if p in resolved_query.lower():
+                    resolved_query = re_module.sub(re_module.escape(p), subject, resolved_query, count=1, flags=re_module.IGNORECASE)
+                    break
+
+        return self._heuristic_classify(resolved_query)
 
     def _heuristic_classify(self, query: str) -> Dict:
         """Zero-latency heuristic classifier (no LLM call)."""
@@ -167,15 +223,15 @@ class LLMService:
 
         protocols = {
             "legal": (
-                "SUPREME FORENSIC ANALYST — Legal Document Intelligence\n\n"
-                "You are a Lead Digital Forensics Expert specializing in legal document analysis.\n\n"
+                "SENIOR LEGAL ANALYST — Legal Document Intelligence\n\n"
+                "You are a Lead Legal Document Analyst specializing in contract, case file, and regulatory analysis.\n\n"
                 "RESPONSE STRUCTURE:\n"
-                "1. STATUTE & PROVISION: Identify the specific legal provisions, sections, or clauses involved.\n"
-                "2. FACTUAL FINDINGS: Extract concrete facts from the document — dates, parties, events.\n"
-                "3. LEGAL ANALYSIS: Connect facts to legal provisions. Distinguish 'Allegations' from 'Technical Artifacts'.\n"
-                "4. EVIDENTIARY GAPS: For missing evidence, name specific artifacts: MFA logs, EDR telemetry, NAC logs, RAM forensics, malware reports, workstation activity logs.\n"
-                "5. CAUSALITY STATEMENT: Conclude with a clear causal chain linking evidence to conclusions.\n\n"
-                "STYLE: Cite exact document sections. Use tables for multi-party comparisons. Bold critical legal terms."
+                "1. APPLICABLE PROVISIONS: Identify the specific legal provisions, sections, clauses, or statutes involved.\n"
+                "2. FACTUAL FINDINGS: Extract concrete facts from the document — dates, parties, events, obligations.\n"
+                "3. LEGAL ANALYSIS: Connect facts to legal provisions. Distinguish between established facts, allegations, and contractual obligations.\n"
+                "4. EVIDENTIARY GAPS: Identify missing information — unsigned clauses, undefined terms, ambiguous language, or absent supporting documents.\n"
+                "5. RISK ASSESSMENT: Conclude with a clear analysis of legal implications, potential liabilities, and recommended actions.\n\n"
+                "STYLE: Cite exact document sections and clause numbers. Use tables for multi-party comparisons. Bold critical legal terms and defined terms."
             ),
             "medical": (
                 "CLINICAL SPECIALIST — Medical Document Intelligence\n\n"
@@ -242,6 +298,7 @@ class LLMService:
         context: str,
         domain: str = "general",
         intent: str = "fact_extraction",
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncIterable[str]:
         """
         Streams a grounded response from Groq.
@@ -262,7 +319,7 @@ class LLMService:
             "4. NO LABELS: Never output 'Intro:' or 'Conclusion:' headers."
         )
 
-        system_content = f"""You are a Supreme Document Intelligence Engine operating at enterprise grade.
+        system_content = f"""You are a grounded document analyst operating at enterprise grade.
         {protocol}
 
         CURRENT INTENT: {intent}
@@ -271,20 +328,35 @@ class LLMService:
         1. STRICT GROUNDING: Answer ONLY from the CONTEXT below. Never use external knowledge.
         2. MISSING INFORMATION: If the answer is not in the CONTEXT, respond exactly:
         "This information was not found in the selected document."
-        3. LOGICAL SYNTHESIS: Connect context pieces into a unified, forensic answer.
-        4. EXHAUSTIVE RETRIEVAL: Do not skip any relevant detail present in the CONTEXT.
-        5. TABULAR COMPARISON: For contradictions/comparisons, use Markdown tables.
-        6. ZERO SPECULATION: Never guess or invent facts.
+        3. CITATION REQUIRED: Every factual claim MUST cite its source using the format [SOURCE: filename | PAGE: N]. Never fabricate or invent citations.
+        4. CONFIDENCE LEVELS: Tag key claims as HIGH (directly stated in document), MEDIUM (strongly implied), or LOW (inferred from context).
+        5. FACT vs INFERENCE: Clearly distinguish what the document explicitly states ("The document states...") from what you infer ("This suggests...").
+        6. ZERO SPECULATION: Never guess, invent facts, or fill gaps with assumptions. If information is partial, say so.
+        7. CONTRADICTIONS: If two context chunks disagree, flag the contradiction explicitly with both sources cited.
+        8. LOGICAL SYNTHESIS: Connect context pieces into a unified answer while preserving source attribution.
 
         {format_section}
 
         CONTEXT:
         {context}"""
 
-        messages = [
+        messages: List[BaseMessage] = [
             SystemMessage(content=system_content),
-            HumanMessage(content=query),
         ]
+
+        if history:
+            for turn in history[-6:]:
+                role = turn.get("role", "user")
+                content = turn.get("content", "")
+                if not content:
+                    continue
+                if role == "user":
+                    messages.append(HumanMessage(content=content))
+                elif role in ("assistant", "bot"):
+                    from langchain_core.messages import AIMessage
+                    messages.append(AIMessage(content=content))
+
+        messages.append(HumanMessage(content=query))
 
         for llm, label in [
             (self.generation_llm, Config.GENERATION_MODEL),
