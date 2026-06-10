@@ -78,7 +78,7 @@ function App() {
 
   const fetchFiles = async () => {
     try {
-      const response = await fetch('http://localhost:8000/files');
+      const response = await fetch('https://aritrada420-bodh-ai-backend.hf.space/files');
       if (response.ok) {
         const data = await response.json();
         setIndexedFiles(data.files);
@@ -148,7 +148,7 @@ function App() {
     formData.append('session_id', sessionId);
 
     try {
-      const response = await fetch('http://localhost:8000/upload', {
+      const response = await fetch('https://aritrada420-bodh-ai-backend.hf.space/upload', {
         method: 'POST',
         body: formData,
       });
@@ -174,7 +174,7 @@ function App() {
           const pollInterval = setInterval(async () => {
             attempts++;
             await fetchFiles();
-            const checkResp = await fetch('http://localhost:8000/files');
+            const checkResp = await fetch('https://aritrada420-bodh-ai-backend.hf.space/files');
             if (checkResp.ok) {
               const checkData = await checkResp.json();
               if (checkData.files.some((f: string) => f.toLowerCase() === data.filename.toLowerCase())) {
@@ -236,7 +236,7 @@ function App() {
 
     try {
       const isDemoMode = !currentFile;
-      const response = await fetch('http://localhost:8000/chat', {
+      const response = await fetch('https://aritrada420-bodh-ai-backend.hf.space/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -568,7 +568,7 @@ function App() {
               className="lead-submit"
               onClick={async () => {
                 if (!leadForm.name || !leadForm.email) return;
-                await fetch('http://localhost:8000/leads', {
+                await fetch('https://aritrada420-bodh-ai-backend.hf.space/leads', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ ...leadForm, message: `Came from ${activeNiche} demo` }),
