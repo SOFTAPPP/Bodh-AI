@@ -26,7 +26,7 @@ class VectorService:
         self.vector_store = None
         self._index_attempted = False
 
-        print(f"--- VectorService: Initialized -> store: {self._store_dir} ---")
+        print(f"--- VectorService: Initialized -> store: {self._store_dir} ----")
 
     @property
     def embeddings(self):
