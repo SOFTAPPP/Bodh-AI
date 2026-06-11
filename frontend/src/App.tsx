@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, type JSX } from 'react';
-import { Upload, Send, FileText, BrainCircuit, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon, Home, Pause } from 'lucide-react';
+import { Upload, Send, FileText, BrainCircuit, User, Loader2, CheckCircle2, Mic, MicOff, Sun, Moon, Home, Pause, Menu, X, Paperclip } from 'lucide-react';
 import './App.css';
 
 interface Message {
@@ -62,11 +62,14 @@ function App() {
   const [showLeadModal, setShowLeadModal] = useState(false);
   const [leadForm, setLeadForm] = useState({ name: '', email: '', business_type: '' });
   const [leadSent, setLeadSent] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionId] = useState(() => Math.random().toString(36).substring(2, 15));
   const [isStreaming, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (darkMode) {
@@ -429,14 +432,19 @@ function App() {
           <BrainCircuit className="logo-icon-nav" />
           <span className="logo-text">BodhAI</span>
         </div>
-        <div className="nav-links">
-          <button onClick={() => setView('landing')} className={view === 'landing' ? 'active' : ''}>Home</button>
-          <button onClick={() => setView('features')} className={view === 'features' ? 'active' : ''}>Features</button>
-          <button onClick={() => setView('chat')} className={view === 'chat' ? 'active' : ''}>Live Demo</button>
+        <div className="nav-right-group">
+          <div className={`nav-links ${mobileNavOpen ? 'open' : ''}`}>
+            <button onClick={() => { setView('landing'); setMobileNavOpen(false); }} className={view === 'landing' ? 'active' : ''}>Home</button>
+            <button onClick={() => { setView('features'); setMobileNavOpen(false); }} className={view === 'features' ? 'active' : ''}>Features</button>
+            <button onClick={() => { setView('chat'); setMobileNavOpen(false); }} className={view === 'chat' ? 'active' : ''}>Live Demo</button>
+          </div>
+          <button className="mobile-hamburger" onClick={() => setMobileNavOpen(!mobileNavOpen)}>
+            {mobileNavOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+          <button className="theme-toggle-nav" onClick={() => setDarkMode(!darkMode)}>
+            {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
         </div>
-        <button className="theme-toggle-nav" onClick={() => setDarkMode(!darkMode)}>
-          {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
       </nav>
 
       <section className="hero-section hero-gradient">
@@ -504,14 +512,19 @@ function App() {
           <BrainCircuit className="logo-icon-nav" />
           <span className="logo-text">BodhAI</span>
         </div>
-        <div className="nav-links">
-          <button onClick={() => setView('landing')} className={view === 'landing' ? 'active' : ''}>Home</button>
-          <button onClick={() => setView('features')} className={view === 'features' ? 'active' : ''}>Features</button>
-          <button onClick={() => setView('chat')} className={view === 'chat' ? 'active' : ''}>Dashboard</button>
+        <div className="nav-right-group">
+          <div className={`nav-links ${mobileNavOpen ? 'open' : ''}`}>
+            <button onClick={() => { setView('landing'); setMobileNavOpen(false); }} className={view === 'landing' ? 'active' : ''}>Home</button>
+            <button onClick={() => { setView('features'); setMobileNavOpen(false); }} className={view === 'features' ? 'active' : ''}>Features</button>
+            <button onClick={() => { setView('chat'); setMobileNavOpen(false); }} className={view === 'chat' ? 'active' : ''}>Dashboard</button>
+          </div>
+          <button className="mobile-hamburger" onClick={() => setMobileNavOpen(!mobileNavOpen)}>
+            {mobileNavOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+          <button className="theme-toggle-nav" onClick={() => setDarkMode(!darkMode)}>
+            {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
         </div>
-        <button className="theme-toggle-nav" onClick={() => setDarkMode(!darkMode)}>
-          {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
       </nav>
 
       <header className="features-header">
@@ -588,8 +601,11 @@ function App() {
       {view === 'features' && <FeaturesView />}
       {view === 'chat' && (
         <div className="app-container view-transition">
-          <aside className="sidebar">
-            <div className="logo" onClick={() => setView('landing')} style={{ cursor: 'pointer' }}>
+          {mobileSidebarOpen && (
+            <div className="sidebar-overlay" onClick={() => setMobileSidebarOpen(false)} />
+          )}
+          <aside className={`sidebar ${mobileSidebarOpen ? 'mobile-open' : ''}`}>
+            <div className="logo" onClick={() => { setView('landing'); setMobileSidebarOpen(false); }} style={{ cursor: 'pointer' }}>
               <div className="logo-icon">
                 <BrainCircuit size={24} color="white" />
               </div>
@@ -634,8 +650,8 @@ function App() {
             </div>
 
             <div className="sidebar-nav">
-              <button onClick={() => setView('landing')}><Home size={18} /> Home</button>
-              <button onClick={() => setView('features')}><BrainCircuit size={18} /> Features</button>
+              <button onClick={() => { setView('landing'); setMobileSidebarOpen(false); }}><Home size={18} /> Home</button>
+              <button onClick={() => { setView('features'); setMobileSidebarOpen(false); }}><BrainCircuit size={18} /> Features</button>
             </div>
 
             <div className="sidebar-footer">
@@ -645,7 +661,12 @@ function App() {
 
           <main className="chat-area">
             <header className="chat-header">
-              <h3>Chat Interface</h3>
+              <div className="chat-header-left">
+                <button className="mobile-hamburger" onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>
+                  {mobileSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+                </button>
+                <h3>Chat Interface</h3>
+              </div>
               <div className="header-actions">
                 {currentFile && (
                   <div className="active-doc-pill">
@@ -658,7 +679,7 @@ function App() {
                 </button>
                 <div className="status-indicator">
                   <div className={`dot ${currentFile ? 'active' : ''}`}></div>
-                  {currentFile ? 'AI Ready' : 'Upload a file to start'}
+                  <span className="status-text">{currentFile ? 'AI Ready' : 'Upload a file to start'}</span>
                 </div>
               </div>
             </header>
@@ -718,6 +739,21 @@ function App() {
                 </div>
               )}
               <div className="input-wrapper">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.csv,.pptx"
+                  onChange={handleFileUpload}
+                  hidden
+                />
+                <button
+                  className={`upload-attach-btn ${isUploading ? 'spinning' : ''}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  type="button"
+                  title="Upload Document"
+                >
+                  {isUploading ? <Loader2 size={20} className="spin" /> : <Paperclip size={20} />}
+                </button>
                 <input
                   type="text"
                   placeholder={`Ask about a ${NICHE_DEMOS[activeNiche].label.toLowerCase()} document...`}
