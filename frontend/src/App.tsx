@@ -153,7 +153,7 @@ function App() {
     formData.append('session_id', sessionId);
 
     try {
-      const response = await fetch('${API_URL}/upload', {
+      const response = await fetch(`${API_URL}/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -241,7 +241,7 @@ function App() {
 
     try {
       const isDemoMode = !currentFile;
-      const response = await fetch('${API_URL}/chat', {
+      const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -583,7 +583,7 @@ function App() {
               className="lead-submit"
               onClick={async () => {
                 if (!leadForm.name || !leadForm.email) return;
-                await fetch('${API_URL}/leads', {
+                await fetch(`${API_URL}/leads`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ ...leadForm, message: `Came from ${activeNiche} demo` }),
