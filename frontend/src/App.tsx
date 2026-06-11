@@ -48,6 +48,8 @@ const NICHE_DEMOS: Record<string, { label: string; icon: string; questions: stri
   },
 };
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 function App() {
   const [view, setView] = useState<'landing' | 'features' | 'chat'>('landing');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -81,7 +83,7 @@ function App() {
 
   const fetchFiles = async () => {
     try {
-      const response = await fetch('https://aritrada420-bodh-ai-backend.hf.space/files');
+      const response = await fetch(`${API_URL}/files`);
       if (response.ok) {
         const data = await response.json();
         setIndexedFiles(data.files);
@@ -151,7 +153,7 @@ function App() {
     formData.append('session_id', sessionId);
 
     try {
-      const response = await fetch('https://aritrada420-bodh-ai-backend.hf.space/upload', {
+      const response = await fetch('${API_URL}/upload', {
         method: 'POST',
         body: formData,
       });
@@ -177,7 +179,7 @@ function App() {
           const pollInterval = setInterval(async () => {
             attempts++;
             await fetchFiles();
-            const checkResp = await fetch('https://aritrada420-bodh-ai-backend.hf.space/files');
+            const checkResp = await fetch(`${API_URL}/files`);
             if (checkResp.ok) {
               const checkData = await checkResp.json();
               if (checkData.files.some((f: string) => f.toLowerCase() === data.filename.toLowerCase())) {
@@ -239,7 +241,7 @@ function App() {
 
     try {
       const isDemoMode = !currentFile;
-      const response = await fetch('https://aritrada420-bodh-ai-backend.hf.space/chat', {
+      const response = await fetch('${API_URL}/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -581,7 +583,7 @@ function App() {
               className="lead-submit"
               onClick={async () => {
                 if (!leadForm.name || !leadForm.email) return;
-                await fetch('https://aritrada420-bodh-ai-backend.hf.space/leads', {
+                await fetch('${API_URL}/leads', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ ...leadForm, message: `Came from ${activeNiche} demo` }),
